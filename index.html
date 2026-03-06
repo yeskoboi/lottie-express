@@ -1,0 +1,1441 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Lottie Express</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@300;400;500;600&display=swap');
+
+  :root {
+    --bg:        #0e0f11;
+    --surface:   #16181c;
+    --surface2:  #1e2128;
+    --border:    #2a2d35;
+    --accent:    #6546fc;
+    --accent2:   #ffb300;
+    --green:     #2dce6e;
+    --red:       #ff4060;
+    --yellow:    #ffb300;
+    --text:      #e8eaf0;
+    --muted:     #6b7280;
+    --mono:      'DM Mono', monospace;
+    --sans:      'DM Sans', sans-serif;
+  }
+
+  * { margin:0; padding:0; box-sizing:border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 14px;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* ── Header ── */
+  header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 18px 28px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+  }
+  .logo-mark {
+    width: 32px; height: 32px;
+    background: var(--accent);
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 16px; font-weight: 700; color: #fff;
+    flex-shrink: 0;
+  }
+  header h1 { font-size: 15px; font-weight: 600; letter-spacing: -0.2px; }
+  header span { font-size: 12px; color: var(--muted); margin-left: 2px; }
+  .header-right { margin-left: auto; display: flex; gap: 10px; align-items: center; }
+  .tag {
+    font-family: var(--mono);
+    font-size: 10px;
+    padding: 3px 8px;
+    border-radius: 4px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--muted);
+  }
+
+  /* ── Main layout ── */
+  main {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 380px 1fr;
+    grid-template-rows: 1fr;
+    min-height: 0;
+  }
+
+  /* ── Left panel ── */
+  .left-panel {
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .panel-section {
+    padding: 20px;
+    border-bottom: 1px solid var(--border);
+  }
+  .panel-section:last-child { border-bottom: none; flex: 1; overflow-y: auto; }
+
+  .section-label {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 12px;
+  }
+
+  /* Drop zone */
+  #drop-zone {
+    border: 1.5px dashed var(--border);
+    border-radius: 10px;
+    padding: 32px 20px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.2s, background 0.2s;
+    background: var(--surface2);
+  }
+  #drop-zone:hover, #drop-zone.drag-over {
+    border-color: var(--accent);
+    background: rgba(255,92,53,0.06);
+  }
+  #drop-zone.has-file {
+    border-color: var(--green);
+    background: rgba(45,206,110,0.05);
+  }
+  .drop-icon {
+    font-size: 28px;
+    margin-bottom: 10px;
+    display: block;
+  }
+  .drop-title { font-size: 13px; font-weight: 500; margin-bottom: 4px; }
+  .drop-sub   { font-size: 11px; color: var(--muted); }
+  #file-input { display: none; }
+
+  /* File info */
+  #file-info {
+    display: none;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    background: var(--surface2);
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    margin-top: 10px;
+  }
+  #file-info.visible { display: flex; }
+  .file-icon { font-size: 18px; }
+  .file-details { flex: 1; min-width: 0; }
+  .file-name { font-size: 12px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .file-size { font-size: 11px; color: var(--muted); }
+  .file-clear { cursor: pointer; color: var(--muted); font-size: 16px; line-height: 1; }
+  .file-clear:hover { color: var(--red); }
+
+  /* Asset drop */
+  #asset-drop {
+    border: 1.5px dashed var(--border);
+    border-radius: 8px;
+    padding: 14px;
+    text-align: center;
+    cursor: pointer;
+    background: var(--surface2);
+    transition: border-color 0.2s;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  #asset-drop:hover { border-color: var(--accent2); }
+  #asset-list { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; max-height: 120px; overflow-y: auto; }
+  .asset-item {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 10px;
+    background: var(--surface);
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    font-size: 11px;
+  }
+  .asset-item .aname { flex:1; font-family: var(--mono); font-size: 10px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .asset-item .asize { color: var(--muted); font-size: 10px; }
+  .asset-item .arm   { cursor:pointer; color:var(--muted); }
+  .asset-item .arm:hover { color:var(--red); }
+  #asset-input { display: none; }
+
+  /* Options */
+  .option-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .option-row:last-child { border-bottom: none; }
+  .option-label { font-size: 12px; }
+  .option-sub   { font-size: 10px; color: var(--muted); margin-top: 1px; }
+
+  /* Toggle switch */
+  .toggle { position:relative; width:34px; height:18px; flex-shrink:0; }
+  .toggle input { opacity:0; width:0; height:0; }
+  .toggle-slider {
+    position:absolute; inset:0;
+    background: var(--border);
+    border-radius: 18px;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+  .toggle-slider:before {
+    content:'';
+    position:absolute;
+    width:12px; height:12px;
+    left:3px; top:3px;
+    background:#fff;
+    border-radius:50%;
+    transition: transform 0.2s;
+  }
+  .toggle input:checked + .toggle-slider { background: var(--accent); }
+  .toggle input:checked + .toggle-slider:before { transform: translateX(16px); }
+
+  /* Select */
+  select {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 12px;
+    padding: 5px 8px;
+    border-radius: 6px;
+    cursor: pointer;
+    outline: none;
+  }
+  select:focus { border-color: var(--accent); }
+
+  input[type="text"], input[type="number"] {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 12px;
+    padding: 5px 8px;
+    border-radius: 6px;
+    outline: none;
+    width: 180px;
+  }
+  input[type="text"]:focus, input[type="number"]:focus { border-color: var(--accent); }
+
+  /* Convert button */
+  #btn-convert {
+    width: 100%;
+    padding: 13px;
+    background: var(--accent);
+    color: #fff;
+    font-family: var(--sans);
+    font-size: 14px;
+    font-weight: 600;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: opacity 0.15s, transform 0.1s;
+    letter-spacing: -0.2px;
+  }
+  #btn-convert:hover:not(:disabled) { opacity: 0.88; }
+  #btn-convert:active:not(:disabled) { transform: scale(0.98); }
+  #btn-convert:disabled { opacity: 0.35; cursor: not-allowed; }
+
+  /* ── Right panel ── */
+  .right-panel {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* Tabs */
+  .tabs {
+    display: flex;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    padding: 0 20px;
+  }
+  .tab {
+    padding: 13px 16px;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--muted);
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition: color 0.15s, border-color 0.15s;
+    margin-bottom: -1px;
+  }
+  .tab:hover { color: var(--text); }
+  .tab.active { color: var(--text); border-bottom-color: var(--accent); }
+
+  .tab-content { display: none; flex: 1; overflow: hidden; }
+  .tab-content.active { display: flex; flex-direction: column; }
+
+  /* Preview tab */
+  #tab-preview {
+    align-items: center;
+    justify-content: center;
+    background: repeating-conic-gradient(#1a1d22 0% 25%, #16181c 0% 50%) 0 0 / 20px 20px;
+    gap: 20px;
+    flex-direction: column;
+    position: relative;
+  }
+  #preview-frame {
+    position: relative;
+    background: #fff;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+    overflow: hidden;
+    flex-shrink: 0;
+  }
+  #preview-frame iframe {
+    width: 100%;
+    height: 100%;
+    border: none;
+    display: block;
+  }
+  .preview-label {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+  }
+  #preview-placeholder {
+    text-align: center;
+  }
+  #preview-placeholder .big-icon { font-size: 48px; margin-bottom: 12px; opacity: 0.3; }
+  #preview-placeholder p { color: var(--muted); font-size: 13px; }
+
+  /* Code tab */
+  #tab-code {
+    position: relative;
+  }
+  #code-output {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px;
+    font-family: var(--mono);
+    font-size: 12px;
+    line-height: 1.7;
+    color: #a8b5c8;
+    white-space: pre;
+    tab-size: 2;
+  }
+  .code-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 20px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+  }
+  .code-toolbar span { font-size: 11px; color: var(--muted); flex: 1; font-family: var(--mono); }
+  .btn-sm {
+    padding: 5px 12px;
+    font-size: 11px;
+    font-weight: 500;
+    border-radius: 5px;
+    border: 1px solid var(--border);
+    cursor: pointer;
+    background: var(--surface2);
+    color: var(--text);
+    font-family: var(--sans);
+    transition: border-color 0.15s;
+  }
+  .btn-sm:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* Report tab */
+  #tab-report { overflow-y: auto; padding: 20px; }
+  .report-empty { color: var(--muted); font-size: 13px; }
+
+  .report-section { margin-bottom: 20px; }
+  .report-section h3 { font-size: 12px; font-weight: 600; margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
+  .badge {
+    display: inline-block;
+    padding: 2px 7px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 600;
+    font-family: var(--mono);
+  }
+  .badge-green  { background: rgba(45,206,110,0.15); color: var(--green); }
+  .badge-yellow { background: rgba(255,179,0,0.15);  color: var(--yellow); }
+  .badge-red    { background: rgba(255,64,96,0.15);  color: var(--red); }
+
+  .report-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 8px 10px;
+    border-radius: 6px;
+    margin-bottom: 4px;
+    font-size: 12px;
+    background: var(--surface2);
+  }
+  .report-row .ri { flex-shrink:0; font-size: 13px; margin-top: 1px; }
+  .report-row .rt { flex: 1; }
+  .report-row .rn { font-weight: 500; font-family: var(--mono); font-size: 11px; }
+  .report-row .rd { color: var(--muted); font-size: 11px; margin-top: 2px; }
+
+  /* Export tab */
+  #tab-export { padding: 24px; overflow-y: auto; }
+  .export-option {
+    border: 1.5px solid var(--border);
+    border-radius: 10px;
+    padding: 18px;
+    margin-bottom: 12px;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+  .export-option:hover { border-color: var(--accent); background: rgba(255,92,53,0.04); }
+  .export-icon { font-size: 28px; }
+  .export-info h3 { font-size: 13px; font-weight: 600; margin-bottom: 3px; }
+  .export-info p  { font-size: 11px; color: var(--muted); }
+  .export-btn {
+    margin-left: auto;
+    padding: 7px 16px;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    font-family: var(--sans);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: opacity 0.15s;
+  }
+  .export-btn:hover { opacity: 0.85; }
+  .export-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+
+  /* Status bar */
+  #status-bar {
+    padding: 8px 20px;
+    border-top: 1px solid var(--border);
+    font-size: 11px;
+    color: var(--muted);
+    font-family: var(--mono);
+    background: var(--surface);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  #status-bar .dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--muted);
+    flex-shrink: 0;
+  }
+  #status-bar .dot.green  { background: var(--green); }
+  #status-bar .dot.orange { background: var(--accent); }
+  #status-bar .dot.red    { background: var(--red); }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+</style>
+</head>
+<body>
+
+<!-- ── Header ── -->
+<header>
+  <div class="logo-mark"><svg width="22" height="22" viewBox="0 0 521 521" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M225.539 434.828L230.188 312.951L127.913 378.076L94.4414 320.394L201.365 263.642L94.4414 206.89L127.913 149.208L230.188 214.333L225.539 92.4565H292.483L287.834 214.333L390.109 149.208L423.581 206.89L316.657 263.642L423.581 320.394L390.109 378.076L287.834 312.951L292.483 434.828H225.539Z" fill="white"/></svg></div>
+  <div>
+    <h1>Lottie Express <span>HTML5 Ad Converter</span></h1>
+  </div>
+  <div class="header-right">
+    <span class="tag">native CSS/JS</span>
+    <span class="tag">no dependencies</span>
+    <span class="tag">IAB compliant</span>
+  </div>
+</header>
+
+<!-- ── Main ── -->
+<main>
+
+  <!-- ── Left panel ── -->
+  <div class="left-panel">
+
+    <!-- Lottie JSON drop -->
+    <div class="panel-section">
+      <div class="section-label">1 · Lottie JSON</div>
+      <div id="drop-zone" onclick="document.getElementById('file-input').click()">
+        <span class="drop-icon">⬇︎</span>
+        <div class="drop-title">Drop Lottie JSON here</div>
+        <div class="drop-sub">or click to browse · .json files only</div>
+      </div>
+      <input type="file" id="file-input" accept=".json" />
+      <div id="file-info">
+        <span class="file-icon">📄</span>
+        <div class="file-details">
+          <div class="file-name" id="fname">—</div>
+          <div class="file-size" id="fsize">—</div>
+        </div>
+        <span class="file-clear" onclick="clearFile()">✕</span>
+      </div>
+    </div>
+
+    <!-- Assets drop -->
+    <div class="panel-section">
+      <div class="section-label">2 · Asset files <span style="color:var(--muted);font-size:10px;text-transform:none;font-weight:400;">(images, fonts — optional if embedded in JSON)</span></div>
+      <div id="asset-drop" onclick="document.getElementById('asset-input').click()">
+        Drop images / SVG / fonts here
+      </div>
+      <input type="file" id="asset-input" multiple accept="image/*,.svg,.woff,.woff2,.ttf" />
+      <div id="asset-list"></div>
+    </div>
+
+    <!-- Options -->
+    <div class="panel-section">
+      <div class="section-label">3 · Options</div>
+
+      <div class="option-row">
+        <div>
+          <div class="option-label">clickTag</div>
+          <div class="option-sub">Leave empty for placeholder</div>
+        </div>
+        <input type="text" id="opt-clicktag" placeholder="https://…" style="width:150px;" />
+      </div>
+
+      <div class="option-row">
+        <div>
+          <div class="option-label">Ad platform</div>
+        </div>
+        <select id="opt-platform">
+          <option value="generic">Generic / clickTag</option>
+          <option value="dcm">Google DCM</option>
+          <option value="adform">Adform</option>
+          <option value="sizmek">Sizmek / Amazon</option>
+        </select>
+      </div>
+
+      <div class="option-row">
+        <div>
+          <div class="option-label">HiDPI / Retina</div>
+          <div class="option-sub">2× canvas scaling</div>
+        </div>
+        <label class="toggle">
+          <input type="checkbox" id="opt-retina" />
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+
+      <div class="option-row">
+        <div>
+          <div class="option-label">Embed assets as Base64</div>
+          <div class="option-sub">Single self-contained HTML</div>
+        </div>
+        <label class="toggle">
+          <input type="checkbox" id="opt-embed" checked />
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+
+      <div class="option-row">
+        <div>
+          <div class="option-label">Loop animation</div>
+        </div>
+        <label class="toggle">
+          <input type="checkbox" id="opt-loop" />
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+
+    </div>
+
+    <!-- Convert button -->
+    <div class="panel-section">
+      <button id="btn-convert" disabled onclick="runConversion()">Convert →</button>
+    </div>
+
+  </div>
+
+  <!-- ── Right panel ── -->
+  <div class="right-panel">
+    <div class="tabs">
+      <div class="tab active" data-tab="preview">Preview</div>
+      <div class="tab" data-tab="code">Generated Code</div>
+      <div class="tab" data-tab="report">Conversion Report</div>
+      <div class="tab" data-tab="export">Export</div>
+    </div>
+
+    <!-- Preview -->
+    <div class="tab-content active" id="tab-preview">
+      <div id="preview-placeholder">
+        <div class="big-icon">▶</div>
+        <p>Drop a Lottie JSON and hit Convert</p>
+      </div>
+      <div id="preview-container" style="display:none; flex-direction:column; align-items:center; gap:12px;">
+        <div id="preview-frame">
+          <iframe id="preview-iframe" sandbox="allow-scripts allow-same-origin"></iframe>
+        </div>
+        <div class="preview-label" id="preview-dims">—</div>
+      </div>
+    </div>
+
+    <!-- Code -->
+    <div class="tab-content" id="tab-code">
+      <div class="code-toolbar">
+        <span id="code-label">No output yet</span>
+        <button class="btn-sm" onclick="copyCode()">Copy</button>
+      </div>
+      <div id="code-output">// Convert a Lottie JSON to see the generated code here.</div>
+    </div>
+
+    <!-- Report -->
+    <div class="tab-content" id="tab-report">
+      <p class="report-empty" id="report-empty">No conversion run yet.</p>
+      <div id="report-content" style="display:none;"></div>
+    </div>
+
+    <!-- Export -->
+    <div class="tab-content" id="tab-export">
+      <div class="export-option">
+        <span class="export-icon">📄</span>
+        <div class="export-info">
+          <h3>Self-contained HTML</h3>
+          <p>Single index.html with all assets Base64 embedded. No external files needed.</p>
+        </div>
+        <button class="export-btn" id="btn-export-html" disabled onclick="exportHTML()">Download</button>
+      </div>
+      <div class="export-option">
+        <span class="export-icon">🗜</span>
+        <div class="export-info">
+          <h3>ZIP package</h3>
+          <p>index.html + separate asset folder. Standard ad-server delivery format.</p>
+        </div>
+        <button class="export-btn" id="btn-export-zip" disabled onclick="exportZIP()">Download</button>
+      </div>
+    </div>
+
+  </div>
+</main>
+
+<!-- ── Status bar ── -->
+<div id="status-bar">
+  <div class="dot" id="status-dot"></div>
+  <span id="status-text">Ready — drop a Lottie JSON to begin</span>
+  <span style="margin-left:auto;" id="status-meta"></span>
+</div>
+
+
+<script>
+// ═══════════════════════════════════════════════════════════════
+//  STATE
+// ═══════════════════════════════════════════════════════════════
+const state = {
+  lottieData: null,
+  lottieFileName: '',
+  assets: {},          // filename → { dataUrl, mimeType, raw: ArrayBuffer }
+  generatedHTML: null,
+  reportItems: [],
+};
+
+// ═══════════════════════════════════════════════════════════════
+//  TABS
+// ═══════════════════════════════════════════════════════════════
+document.querySelectorAll('.tab').forEach(t => {
+  t.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(x => x.classList.remove('active'));
+    t.classList.add('active');
+    document.getElementById('tab-' + t.dataset.tab).classList.add('active');
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════
+//  FILE DROP — LOTTIE JSON
+// ═══════════════════════════════════════════════════════════════
+const dropZone = document.getElementById('drop-zone');
+const fileInput = document.getElementById('file-input');
+
+['dragenter','dragover'].forEach(e => dropZone.addEventListener(e, ev => { ev.preventDefault(); dropZone.classList.add('drag-over'); }));
+['dragleave','drop'].forEach(e => dropZone.addEventListener(e, ev => { ev.preventDefault(); dropZone.classList.remove('drag-over'); }));
+dropZone.addEventListener('drop', ev => loadJSONFile(ev.dataTransfer.files[0]));
+fileInput.addEventListener('change', () => loadJSONFile(fileInput.files[0]));
+
+function loadJSONFile(file) {
+  if (!file || !file.name.endsWith('.json')) { setStatus('red', 'Please drop a .json file'); return; }
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      state.lottieData = JSON.parse(e.target.result);
+      state.lottieFileName = file.name.replace('.json','');
+      document.getElementById('fname').textContent = file.name;
+      document.getElementById('fsize').textContent = formatBytes(file.size) + ' · ' + (state.lottieData.layers?.length || 0) + ' layers · ' + state.lottieData.fr + 'fps';
+      document.getElementById('file-info').classList.add('visible');
+      dropZone.classList.add('has-file');
+      document.getElementById('btn-convert').disabled = false;
+      setStatus('green', 'JSON loaded — ' + (state.lottieData.layers?.length || 0) + ' layers, ' + state.lottieData.fr + 'fps, ' + Math.round(state.lottieData.op / state.lottieData.fr * 10)/10 + 's duration');
+    } catch(err) {
+      setStatus('red', 'Invalid JSON: ' + err.message);
+    }
+  };
+  reader.readAsText(file);
+}
+
+function clearFile() {
+  state.lottieData = null;
+  document.getElementById('file-info').classList.remove('visible');
+  dropZone.classList.remove('has-file');
+  document.getElementById('btn-convert').disabled = true;
+  fileInput.value = '';
+  setStatus('', 'Ready');
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  ASSET FILES
+// ═══════════════════════════════════════════════════════════════
+const assetDrop = document.getElementById('asset-drop');
+const assetInput = document.getElementById('asset-input');
+
+['dragenter','dragover'].forEach(e => assetDrop.addEventListener(e, ev => { ev.preventDefault(); assetDrop.style.borderColor = 'var(--accent2)'; }));
+['dragleave','drop'].forEach(e => assetDrop.addEventListener(e, ev => { ev.preventDefault(); assetDrop.style.borderColor = ''; }));
+assetDrop.addEventListener('drop', ev => loadAssets(ev.dataTransfer.files));
+assetInput.addEventListener('change', () => loadAssets(assetInput.files));
+
+function loadAssets(files) {
+  Array.from(files).forEach(file => {
+    const reader = new FileReader();
+    reader.onload = e => {
+      const mime = file.type || guessMime(file.name);
+      state.assets[file.name] = { dataUrl: e.target.result, mimeType: mime, size: file.size };
+      renderAssetList();
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function renderAssetList() {
+  const list = document.getElementById('asset-list');
+  list.innerHTML = '';
+  Object.entries(state.assets).forEach(([name, info]) => {
+    list.innerHTML += `<div class="asset-item">
+      <span class="aname">${name}</span>
+      <span class="asize">${formatBytes(info.size)}</span>
+      <span class="arm" onclick="removeAsset('${name}')">✕</span>
+    </div>`;
+  });
+}
+function removeAsset(name) { delete state.assets[name]; renderAssetList(); }
+
+// ═══════════════════════════════════════════════════════════════
+//  CORE CONVERTER
+// ═══════════════════════════════════════════════════════════════
+function runConversion() {
+  if (!state.lottieData) return;
+  setStatus('orange', 'Converting…');
+  state.reportItems = [];
+
+  try {
+    const result = convertLottie(state.lottieData);
+    state.generatedHTML = result.html;
+
+    // Update code tab
+    document.getElementById('code-output').textContent = result.html;
+    document.getElementById('code-label').textContent = 'index.html · ' + formatBytes(new Blob([result.html]).size);
+
+    // Update preview
+    showPreview(result.html, result.w, result.h);
+
+    // Update report
+    renderReport(result.report);
+
+    // Enable exports
+    document.getElementById('btn-export-html').disabled = false;
+    document.getElementById('btn-export-zip').disabled = false;
+
+    const warns = result.report.filter(r => r.type === 'warn').length;
+    const skips = result.report.filter(r => r.type === 'skip').length;
+    setStatus('green', `Converted successfully · ${result.report.filter(r=>r.type==='ok').length} layers · ${warns} warnings · ${skips} skipped`);
+
+    // Switch to preview
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+    document.querySelector('[data-tab="preview"]').classList.add('active');
+    document.getElementById('tab-preview').classList.add('active');
+
+  } catch(err) {
+    setStatus('red', 'Conversion error: ' + err.message);
+    console.error(err);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  LOTTIE PARSER + CODE GENERATOR
+// ═══════════════════════════════════════════════════════════════
+function convertLottie(data) {
+  const fps     = data.fr || 30;
+  const totalF  = data.op || 0;
+  const w       = data.w  || 300;
+  const h       = data.h  || 250;
+  const totalMs = Math.round((totalF / fps) * 1000);
+  const loop    = document.getElementById('opt-loop').checked;
+  const retina  = document.getElementById('opt-retina').checked;
+  const embed   = document.getElementById('opt-embed').checked;
+  const platform = document.getElementById('opt-platform').value;
+  const clickTag = document.getElementById('opt-clicktag').value.trim();
+
+  const report  = [];
+  const cssBlocks = [];
+  const layerInits = [];
+  const layerDivs = [];
+
+  // ── Resolve embedded assets from JSON ──────────────────────────
+  const assetMap = {};
+  if (data.assets) {
+    data.assets.forEach(asset => {
+      if (asset.p && asset.u !== undefined) {
+        // Image asset embedded in JSON
+        if (asset.p.startsWith('data:')) {
+          assetMap[asset.id] = asset.p;
+        } else {
+          // External reference — check our uploaded assets
+          const uploaded = state.assets[asset.p];
+          if (uploaded) {
+            assetMap[asset.id] = embed ? uploaded.dataUrl : asset.p;
+          } else {
+            assetMap[asset.id] = asset.p; // keep filename, user must supply
+            report.push({ type:'warn', name: asset.p, desc: 'Asset not found in uploaded files — using filename reference' });
+          }
+        }
+      }
+    });
+  }
+  // Also add directly uploaded assets
+  Object.entries(state.assets).forEach(([name, info]) => {
+    if (!assetMap[name]) assetMap[name] = embed ? info.dataUrl : name;
+  });
+
+  // ── Process layers ──────────────────────────────────────────────
+  const layers = [...(data.layers || [])].reverse(); // AE layers: index 0 = top, we reverse for z-order
+
+  layers.forEach((layer, idx) => {
+    const layerId = 'layer_' + idx + '_' + safeName(layer.nm || 'layer');
+    const inMs  = Math.round((layer.ip / fps) * 1000);
+    const outMs = Math.round((layer.op / fps) * 1000);
+    const startMs = Math.round(((layer.st || 0) / fps) * 1000);
+
+    // ── Unsupported layer types ──
+    // 0=Precomp, 1=Solid, 2=Image, 3=Null, 4=Shape, 5=Text, 6=Audio
+    const layerType = layer.ty;
+    if (layerType === 6) {
+      report.push({ type:'skip', name: layer.nm || 'layer', desc: 'Audio layer — skipped (not supported in HTML5 ads)' });
+      return;
+    }
+    if (layerType === 4) {
+      report.push({ type:'warn', name: layer.nm || 'layer', desc: 'Shape layer — basic transform supported, vector paths not rendered' });
+    }
+
+    // ── Check for unsupported features ──
+    if (layer.ef && layer.ef.length > 0) {
+      report.push({ type:'warn', name: layer.nm || 'layer', desc: `Effects (${layer.ef.map(e=>e.nm).join(', ')}) — not supported, skipped` });
+    }
+    if (layer.tt) {
+      report.push({ type:'warn', name: layer.nm || 'layer', desc: 'Track matte — not supported, layer will render without matte' });
+    }
+    if (layer.hasMask) {
+      report.push({ type:'warn', name: layer.nm || 'layer', desc: 'Mask — not supported in CSS, skipped' });
+    }
+
+    // ── Transform keyframes ──────────────────────────────────────
+    const ks = layer.ks || {};
+
+    const posKF   = extractKeyframes(ks.p, fps, 'position');
+    const scaleKF = extractKeyframes(ks.s, fps, 'scale');
+    const rotKF   = extractKeyframes(ks.r, fps, 'rotation');
+    const opKF    = extractKeyframes(ks.o, fps, 'opacity');
+    const anchorKF = extractKeyframes(ks.a, fps, 'anchor');
+
+    // Static values
+    const posStatic   = getStaticValue(ks.p);
+    const scaleStatic = getStaticValue(ks.s);
+    const rotStatic   = getStaticValue(ks.r);
+    const opStatic    = getStaticValue(ks.o);
+    const anchorStatic = getStaticValue(ks.a);
+
+    const anchor = anchorStatic || [0, 0];
+    const hasAnim = posKF.length > 1 || scaleKF.length > 1 || rotKF.length > 1 || opKF.length > 1;
+
+    // ── Build CSS ────────────────────────────────────────────────
+    let animNames = [];
+    let animDurations = [];
+    let animDelays = [];
+    let animFills = [];
+    let animTimings = [];
+    let animIter = [];
+
+    const animDuration = outMs - inMs;
+
+    if (posKF.length > 1) {
+      const name = layerId + '_pos';
+      cssBlocks.push(buildKeyframes(name, posKF, inMs, animDuration, (v) => {
+        const tx = (v[0] - anchor[0]);
+        const ty = (v[1] - anchor[1]);
+        return `transform: translate(${tx.toFixed(2)}px, ${ty.toFixed(2)}px) ${buildScaleRot(scaleStatic, rotStatic)}`;
+      }));
+      animNames.push(name);
+      animDurations.push(animDuration + 'ms');
+      animDelays.push(inMs + 'ms');
+      animFills.push('both');
+      animTimings.push('linear');
+      animIter.push(loop ? 'infinite' : '1');
+    }
+
+    if (opKF.length > 1) {
+      const name = layerId + '_op';
+      cssBlocks.push(buildKeyframes(name, opKF, inMs, animDuration, (v) => {
+        return `opacity: ${(v[0] / 100).toFixed(3)}`;
+      }));
+      animNames.push(name);
+      animDurations.push(animDuration + 'ms');
+      animDelays.push(inMs + 'ms');
+      animFills.push('both');
+      animTimings.push('linear');
+      animIter.push(loop ? 'infinite' : '1');
+    }
+
+    if (scaleKF.length > 1) {
+      const name = layerId + '_sc';
+      cssBlocks.push(buildKeyframes(name, scaleKF, inMs, animDuration, (v, pos, rot) => {
+        const sx = (v[0] / 100).toFixed(4);
+        const sy = (v[1] / 100).toFixed(4);
+        const r = rotStatic ? rotStatic[0].toFixed(2) : 0;
+        return `transform: translate(${posStatic ? (posStatic[0]-anchor[0]).toFixed(2) : 0}px, ${posStatic ? (posStatic[1]-anchor[1]).toFixed(2) : 0}px) scale(${sx}, ${sy}) rotate(${r}deg)`;
+      }));
+      animNames.push(name);
+      animDurations.push(animDuration + 'ms');
+      animDelays.push(inMs + 'ms');
+      animFills.push('both');
+      animTimings.push('linear');
+      animIter.push(loop ? 'infinite' : '1');
+    }
+
+    if (rotKF.length > 1) {
+      const name = layerId + '_rot';
+      cssBlocks.push(buildKeyframes(name, rotKF, inMs, animDuration, (v) => {
+        const px = posStatic ? (posStatic[0]-anchor[0]).toFixed(2) : 0;
+        const py = posStatic ? (posStatic[1]-anchor[1]).toFixed(2) : 0;
+        const sx = scaleStatic ? (scaleStatic[0]/100).toFixed(4) : 1;
+        const sy = scaleStatic ? (scaleStatic[1]/100).toFixed(4) : 1;
+        return `transform: translate(${px}px, ${py}px) scale(${sx},${sy}) rotate(${v[0].toFixed(2)}deg)`;
+      }));
+      animNames.push(name);
+      animDurations.push(animDuration + 'ms');
+      animDelays.push(inMs + 'ms');
+      animFills.push('both');
+      animTimings.push('linear');
+      animIter.push(loop ? 'infinite' : '1');
+    }
+
+    // ── Initial static transform ─────────────────────────────────
+    const initPx = posStatic ? (posStatic[0] - anchor[0]).toFixed(2) : 0;
+    const initPy = posStatic ? (posStatic[1] - anchor[1]).toFixed(2) : 0;
+    const initSx = scaleStatic ? (scaleStatic[0]/100).toFixed(4) : 1;
+    const initSy = scaleStatic ? (scaleStatic[1]/100).toFixed(4) : 1;
+    const initR  = rotStatic   ? rotStatic[0].toFixed(2) : 0;
+    const initOp = opStatic    ? (opStatic[0] / 100).toFixed(3) : (layer.ip > 0 ? 0 : 1);
+
+    const initTransform = `translate(${initPx}px, ${initPy}px) scale(${initSx}, ${initSy}) rotate(${initR}deg)`;
+
+    // Visibility: hidden until inMs
+    const visStyle = layer.ip > 0 ? `opacity:${initOp};` : `opacity:${initOp};`;
+
+    // ── Determine content ────────────────────────────────────────
+    let innerContent = '';
+    let extraStyle = '';
+
+    if (layerType === 2) {
+      // Image layer
+      const refId = layer.refId;
+      const src = assetMap[refId] || refId || '';
+      const imgAsset = data.assets ? data.assets.find(a => a.id === refId) : null;
+      const imgW = imgAsset ? imgAsset.w : 'auto';
+      const imgH = imgAsset ? imgAsset.h : 'auto';
+      innerContent = `<img src="${src}" width="${imgW}" height="${imgH}" style="display:block;max-width:none;" alt="" />`;
+      extraStyle = `width:${imgW}px;height:${imgH}px;`;
+      report.push({ type:'ok', name: layer.nm || 'image', desc: `Image layer → <img> tag` });
+
+    } else if (layerType === 5) {
+      // Text layer
+      const textData = layer.t && layer.t.d && layer.t.d.k && layer.t.d.k[0] && layer.t.d.k[0].s;
+      if (textData) {
+        const txt   = (textData.t || '').replace(/\r/g,'<br>');
+        const fs    = textData.s || 16;
+        const fc    = textData.fc ? rgbaToCSS(textData.fc) : '#000';
+        const ff    = textData.f || 'Arial';
+        const fwMap = { Regular:400, Bold:700, Light:300, Medium:500 };
+        const fw    = fwMap[textData.f?.split('-').pop()] || 400;
+        innerContent = `<div style="font-size:${fs}px;color:${fc};font-family:'${ff.split('-')[0]}',sans-serif;font-weight:${fw};white-space:pre;">${txt}</div>`;
+        report.push({ type:'ok', name: layer.nm || 'text', desc: `Text layer → HTML div (font: ${ff}, ${fs}px)` });
+      } else {
+        report.push({ type:'warn', name: layer.nm || 'text', desc: 'Text layer — could not extract text data' });
+      }
+
+    } else if (layerType === 1) {
+      // Solid layer
+      const sc = layer.sc || '#000000';
+      const sw = layer.sw || w;
+      const sh = layer.sh || h;
+      extraStyle = `width:${sw}px;height:${sh}px;background:${sc};`;
+      report.push({ type:'ok', name: layer.nm || 'solid', desc: `Solid layer → colored div (${sc})` });
+
+    } else if (layerType === 0) {
+      // Precomp
+      report.push({ type:'warn', name: layer.nm || 'precomp', desc: 'Precomposition — renders as empty div (nested compositions not yet supported)' });
+    } else if (layerType === 3) {
+      // Null — just a transform container
+      extraStyle = 'pointer-events:none;';
+      report.push({ type:'ok', name: layer.nm || 'null', desc: 'Null layer → invisible transform container' });
+    } else if (layerType === 4) {
+      // Shape — placeholder
+      extraStyle = 'pointer-events:none;';
+    }
+
+    // ── Build animation CSS ───────────────────────────────────────
+    let animCSS = '';
+    if (animNames.length > 0) {
+      animCSS = `
+  animation-name: ${animNames.join(', ')};
+  animation-duration: ${animDurations.join(', ')};
+  animation-delay: ${animDelays.join(', ')};
+  animation-fill-mode: ${animFills.join(', ')};
+  animation-timing-function: ${animTimings.join(', ')};
+  animation-iteration-count: ${animIter.join(', ')};`;
+    }
+
+    const zIndex = layers.length - idx;
+
+    // Per-layer CSS
+    cssBlocks.push(`
+#${layerId} {
+  position: absolute;
+  top: 0; left: 0;
+  transform-origin: ${anchor[0]}px ${anchor[1]}px;
+  transform: ${initTransform};
+  ${visStyle}
+  z-index: ${zIndex};
+  ${extraStyle}${animCSS}
+}`);
+
+    layerDivs.push(`  <div id="${layerId}">${innerContent}</div>`);
+  });
+
+  // ── clickTag snippet ───────────────────────────────────────────
+  const clickTagSnippet = buildClickTag(platform, clickTag);
+
+  // ── Assemble HTML ──────────────────────────────────────────────
+  const displayW = retina ? w * 2 : w;
+  const displayH = retina ? h * 2 : h;
+  const scaleStyle = retina ? `transform:scale(0.5);transform-origin:top left;width:${displayW}px;height:${displayH}px;` : '';
+
+  const html = `<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="ad.size" content="width=${w},height=${h}" />
+  <title>${state.lottieFileName || 'ad'}</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: ${w}px; height: ${h}px; overflow: hidden; }
+
+    #ad-container {
+      position: relative;
+      width: ${w}px;
+      height: ${h}px;
+      overflow: hidden;
+      cursor: pointer;
+      ${scaleStyle}
+    }
+${cssBlocks.join('\n')}
+
+    /* ── Keyframe animations ── */
+${cssBlocks.filter(b => b.trim().startsWith('@keyframes')).join('\n')}
+  </style>
+</head>
+<body>
+
+<div id="ad-container">
+${layerDivs.join('\n')}
+</div>
+
+<script>
+${clickTagSnippet}
+
+  document.getElementById('ad-container').addEventListener('click', function() {
+    if (typeof clickTag !== 'undefined' && clickTag) {
+      window.open(clickTag, '_blank');
+    }
+  });
+<\/script>
+
+</body>
+</html>`;
+
+  // Clean up duplicated @keyframes from cssBlocks (we embedded them in <style> body above already)
+  const cleanedHTML = buildCleanHTML(data, fps, w, h, layers, cssBlocks, layerDivs, clickTagSnippet, retina, scaleStyle, loop);
+
+  return { html: cleanedHTML, w, h, report };
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  CLEAN HTML BUILDER (single-pass, no duplicate @keyframes)
+// ═══════════════════════════════════════════════════════════════
+function buildCleanHTML(data, fps, w, h, layers, cssBlocks, layerDivs, clickTagSnippet, retina, scaleStyle, loop) {
+  // Split CSS into @keyframes and rules
+  const keyframeBlocks = cssBlocks.filter(b => b.trim().startsWith('@keyframes'));
+  const ruleBlocks     = cssBlocks.filter(b => !b.trim().startsWith('@keyframes'));
+
+  const embed = document.getElementById('opt-embed').checked;
+
+  return `<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="ad.size" content="width=${w},height=${h}" />
+  <title>${state.lottieFileName || 'ad'}</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: ${w}px; height: ${h}px; overflow: hidden; }
+
+    #ad-container {
+      position: relative;
+      width: ${w}px;
+      height: ${h}px;
+      overflow: hidden;
+      cursor: pointer;
+    }
+
+    /* ── Layer rules ── */
+${ruleBlocks.join('\n')}
+
+    /* ── Keyframe animations ── */
+${keyframeBlocks.join('\n')}
+  </style>
+</head>
+<body>
+
+<div id="ad-container">
+${layerDivs.join('\n')}
+</div>
+
+<script>
+${clickTagSnippet}
+
+  document.getElementById('ad-container').addEventListener('click', function() {
+    if (typeof clickTag !== 'undefined' && clickTag) {
+      window.open(clickTag, '_blank');
+    }
+  });
+<\/script>
+
+</body>
+</html>`;
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  KEYFRAME HELPERS
+// ═══════════════════════════════════════════════════════════════
+function extractKeyframes(prop, fps, type) {
+  if (!prop) return [];
+  // Unanimated
+  if (prop.a === 0 || (!Array.isArray(prop.k) || typeof prop.k[0] === 'number')) {
+    const v = Array.isArray(prop.k) ? prop.k : [prop.k];
+    return [{ t: 0, v }];
+  }
+  // Animated keyframes
+  return prop.k.map(kf => ({
+    t: Math.round((kf.t / fps) * 1000),
+    v: Array.isArray(kf.s) ? kf.s : [kf.s],
+    e: Array.isArray(kf.e) ? kf.e : (kf.e ? [kf.e] : null),
+    easing: bezierFromKF(kf),
+  })).filter(kf => kf.v);
+}
+
+function getStaticValue(prop) {
+  if (!prop) return null;
+  if (prop.a === 0) {
+    return Array.isArray(prop.k) ? prop.k : [prop.k];
+  }
+  if (Array.isArray(prop.k) && prop.k.length > 0 && prop.k[0].s) {
+    return prop.k[0].s;
+  }
+  return null;
+}
+
+function bezierFromKF(kf) {
+  if (!kf.o || !kf.i) return 'linear';
+  const ox = Array.isArray(kf.o.x) ? kf.o.x[0] : kf.o.x;
+  const oy = Array.isArray(kf.o.y) ? kf.o.y[0] : kf.o.y;
+  const ix = Array.isArray(kf.i.x) ? kf.i.x[0] : kf.i.x;
+  const iy = Array.isArray(kf.i.y) ? kf.i.y[0] : kf.i.y;
+  if (ox == null) return 'linear';
+  // Common eases
+  if (Math.abs(ox - 0.42) < 0.05 && Math.abs(iy - 1) < 0.05) return 'ease-in';
+  if (Math.abs(ox - 0) < 0.05 && Math.abs(oy - 0) < 0.05 && Math.abs(ix - 0.58) < 0.05 && Math.abs(iy - 1) < 0.05) return 'ease-out';
+  return `cubic-bezier(${f(ox)},${f(oy)},${f(ix)},${f(iy)})`;
+}
+
+function buildKeyframes(name, keyframes, inMs, duration, valueToCSS) {
+  if (keyframes.length <= 1) return '';
+  let lines = [`@keyframes ${name} {`];
+  keyframes.forEach((kf, i) => {
+    const relMs = kf.t - inMs;
+    const pct   = duration > 0 ? Math.round((relMs / duration) * 10000) / 100 : 0;
+    const safePct = Math.max(0, Math.min(100, pct));
+    const cssVal = valueToCSS(kf.v, kf);
+    lines.push(`  ${safePct}% { ${cssVal}; ${kf.easing && kf.easing !== 'linear' ? 'animation-timing-function:' + kf.easing + ';' : ''} }`);
+  });
+  lines.push('}');
+  return lines.join('\n');
+}
+
+function buildScaleRot(scale, rot) {
+  const sx = scale ? (scale[0]/100).toFixed(4) : 1;
+  const sy = scale ? (scale[1]/100).toFixed(4) : 1;
+  const r  = rot   ? rot[0].toFixed(2) : 0;
+  return `scale(${sx}, ${sy}) rotate(${r}deg)`;
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  CLICKTAG SNIPPETS
+// ═══════════════════════════════════════════════════════════════
+function buildClickTag(platform, url) {
+  const val = url ? `"${url}"` : '""';
+  switch(platform) {
+    case 'dcm':
+      return `  // Google DCM clickTag
+  var clickTag = "${url || ''}";
+  // DCM also reads from URL param
+  (function() {
+    var scripts = document.getElementsByTagName('script');
+    var myScript = scripts[scripts.length - 1];
+    var urlParam = encodeURIComponent(myScript.src.replace(/^.*[&?]clickTag=([^&]*).*$/i, '$1'));
+    if (urlParam && urlParam !== myScript.src) clickTag = urlParam;
+  })();`;
+    case 'adform':
+      return `  // Adform clickTag
+  var clickTag = ${val};
+  if (typeof Adform !== 'undefined') { clickTag = Adform.getClickTag(0) || clickTag; }`;
+    case 'sizmek':
+      return `  // Sizmek / Amazon clickTag
+  var clickTag = ${val};
+  if (typeof EBLoader !== 'undefined') {
+    EBLoader.onReady(function() { clickTag = EB.clickthrough('ClickTag') || clickTag; });
+  }`;
+    default:
+      return `  // clickTag — set this URL before trafficking
+  var clickTag = ${val};`;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  PREVIEW
+// ═══════════════════════════════════════════════════════════════
+function showPreview(html, w, h) {
+  const placeholder = document.getElementById('preview-placeholder');
+  const container   = document.getElementById('preview-container');
+  const frame       = document.getElementById('preview-frame');
+  const iframe      = document.getElementById('preview-iframe');
+
+  // Scale to fit preview area
+  const maxW = 420, maxH = 500;
+  const scale = Math.min(maxW / w, maxH / h, 1);
+  const dw = Math.round(w * scale);
+  const dh = Math.round(h * scale);
+
+  frame.style.width  = dw + 'px';
+  frame.style.height = dh + 'px';
+  iframe.style.width  = w + 'px';
+  iframe.style.height = h + 'px';
+  iframe.style.transform = `scale(${scale})`;
+  iframe.style.transformOrigin = 'top left';
+
+  document.getElementById('preview-dims').textContent = `${w} × ${h}px · scale ${Math.round(scale*100)}%`;
+
+  placeholder.style.display = 'none';
+  container.style.display   = 'flex';
+
+  // Safari file:// compatible — use srcdoc instead of blob URL
+  iframe.removeAttribute('src');
+  iframe.srcdoc = html;
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  REPORT
+// ═══════════════════════════════════════════════════════════════
+function renderReport(items) {
+  const empty   = document.getElementById('report-empty');
+  const content = document.getElementById('report-content');
+
+  if (!items.length) {
+    empty.style.display = 'block';
+    content.style.display = 'none';
+    return;
+  }
+
+  empty.style.display = 'none';
+  content.style.display = 'block';
+
+  const ok    = items.filter(i => i.type === 'ok');
+  const warns = items.filter(i => i.type === 'warn');
+  const skips = items.filter(i => i.type === 'skip');
+
+  let html = '';
+
+  if (ok.length) {
+    html += `<div class="report-section">
+      <h3>Converted <span class="badge badge-green">${ok.length}</span></h3>
+      ${ok.map(i => `<div class="report-row"><span class="ri">✓</span><div class="rt"><div class="rn">${i.name}</div><div class="rd">${i.desc}</div></div></div>`).join('')}
+    </div>`;
+  }
+  if (warns.length) {
+    html += `<div class="report-section">
+      <h3>Warnings <span class="badge badge-yellow">${warns.length}</span></h3>
+      ${warns.map(i => `<div class="report-row"><span class="ri">⚠</span><div class="rt"><div class="rn">${i.name}</div><div class="rd">${i.desc}</div></div></div>`).join('')}
+    </div>`;
+  }
+  if (skips.length) {
+    html += `<div class="report-section">
+      <h3>Skipped <span class="badge badge-red">${skips.length}</span></h3>
+      ${skips.map(i => `<div class="report-row"><span class="ri">✕</span><div class="rt"><div class="rn">${i.name}</div><div class="rd">${i.desc}</div></div></div>`).join('')}
+    </div>`;
+  }
+
+  content.innerHTML = html;
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  EXPORT
+// ═══════════════════════════════════════════════════════════════
+function exportHTML() {
+  if (!state.generatedHTML) return;
+  download(state.lottieFileName + '_320x480_DE.html', state.generatedHTML, 'text/html');
+}
+
+async function exportZIP() {
+  if (!state.generatedHTML) return;
+  // Use a simple zip via fflate (loaded inline)
+  setStatus('orange', 'Building ZIP…');
+  try {
+    const script = document.createElement('script');
+    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/fflate/0.8.2/fflate.min.js';
+    document.head.appendChild(script);
+    script.onload = () => {
+      const files = {};
+      const folderName = state.lottieFileName || 'ad';
+
+      // index.html with relative asset references (non-embedded version)
+      const htmlForZip = state.generatedHTML;
+      files[`${folderName}/index.html`] = fflate.strToU8(htmlForZip);
+
+      // Add asset files
+      Object.entries(state.assets).forEach(([name, info]) => {
+        // Convert dataURL to Uint8Array
+        const b64 = info.dataUrl.split(',')[1];
+        const bin = atob(b64);
+        const arr = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+        files[`${folderName}/${name}`] = arr;
+      });
+
+      fflate.zip(files, (err, data) => {
+        if (err) { setStatus('red', 'ZIP error: ' + err); return; }
+        // Convert to base64 data URI for Safari file:// compatibility
+        let binary = '';
+        const bytes = new Uint8Array(data);
+        for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
+        const b64 = btoa(binary);
+        const a = document.createElement('a');
+        a.href = 'data:application/zip;base64,' + b64;
+        a.download = folderName + '.zip'; a.click();
+        setStatus('green', 'ZIP downloaded');
+      });
+    };
+  } catch(e) {
+    // Fallback: just download HTML
+    exportHTML();
+    setStatus('yellow', 'ZIP library unavailable — downloaded HTML instead');
+  }
+}
+
+function download(filename, content, mime) {
+  // Safari file:// compatible — use data URI
+  if (mime === 'text/html') {
+    const dataUri = 'data:text/html;charset=utf-8,' + encodeURIComponent(content);
+    const a = document.createElement('a');
+    a.href = dataUri; a.download = filename; a.click();
+  } else {
+    const blob = new Blob([content], { type: mime });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href = url; a.download = filename; a.click();
+    URL.revokeObjectURL(url);
+  }
+}
+
+function copyCode() {
+  if (!state.generatedHTML) return;
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(state.generatedHTML).then(() => {
+      setStatus('green', 'Code copied to clipboard');
+    }).catch(() => copyFallback(state.generatedHTML));
+  } else {
+    copyFallback(state.generatedHTML);
+  }
+}
+function copyFallback(text) {
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.position = 'fixed'; ta.style.opacity = '0';
+  document.body.appendChild(ta);
+  ta.focus(); ta.select();
+  document.execCommand('copy');
+  document.body.removeChild(ta);
+  setStatus('green', 'Code copied to clipboard');
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  UTILITIES
+// ═══════════════════════════════════════════════════════════════
+function formatBytes(b) {
+  if (b < 1024) return b + 'B';
+  if (b < 1048576) return (b/1024).toFixed(1) + 'KB';
+  return (b/1048576).toFixed(1) + 'MB';
+}
+function safeName(s) { return s.replace(/[^a-zA-Z0-9_]/g,'_').toLowerCase(); }
+function f(n) { return Math.round(n * 1000) / 1000; }
+function rgbaToCSS(arr) {
+  if (!arr) return '#000';
+  const r = Math.round(arr[0]*255), g = Math.round(arr[1]*255), b = Math.round(arr[2]*255);
+  const a = arr[3] !== undefined ? arr[3] : 1;
+  return a < 1 ? `rgba(${r},${g},${b},${a.toFixed(3)})` : `rgb(${r},${g},${b})`;
+}
+function guessMime(name) {
+  const ext = name.split('.').pop().toLowerCase();
+  const map = { png:'image/png', jpg:'image/jpeg', jpeg:'image/jpeg', gif:'image/gif', svg:'image/svg+xml', webp:'image/webp', woff:'font/woff', woff2:'font/woff2', ttf:'font/ttf' };
+  return map[ext] || 'application/octet-stream';
+}
+
+function setStatus(type, msg) {
+  const dot = document.getElementById('status-dot');
+  dot.className = 'dot ' + type;
+  document.getElementById('status-text').textContent = msg;
+}
+</script>
+
+</body>
+</html>
