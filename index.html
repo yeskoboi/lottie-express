@@ -554,9 +554,28 @@
         </label>
       </div>
 
-    </div>
+      <div class="option-row">
+        <div>
+          <div class="option-label">Optimise images</div>
+          <div class="option-sub">Resize to render size · convert to WebP</div>
+        </div>
+        <label class="toggle">
+          <input type="checkbox" id="opt-optimise" checked />
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
 
-    <!-- Convert button -->
+      <div class="option-row">
+        <div>
+          <div class="option-label">WebP quality</div>
+          <div class="option-sub" id="opt-quality-label">85%</div>
+        </div>
+        <input type="range" id="opt-quality" min="50" max="100" value="85"
+          style="width:100px;accent-color:var(--accent);"
+          oninput="document.getElementById('opt-quality-label').textContent=this.value+'%'" />
+      </div>
+
+    </div>
     <div class="panel-section">
       <button id="btn-convert" disabled onclick="runConversion()">Convert →</button>
     </div>
@@ -582,7 +601,10 @@
         <div id="preview-frame">
           <iframe id="preview-iframe" sandbox="allow-scripts allow-same-origin"></iframe>
         </div>
-        <div class="preview-label" id="preview-dims">—</div>
+        <div style="display:flex;align-items:center;gap:12px;">
+          <div class="preview-label" id="preview-dims">—</div>
+          <button class="btn-sm" onclick="replayPreview()" style="font-size:10px;padding:3px 10px;">↺ Replay</button>
+        </div>
       </div>
     </div>
 
@@ -735,34 +757,64 @@ function removeAsset(name) { delete state.assets[name]; renderAssetList(); }
 // ═══════════════════════════════════════════════════════════════
 //  CORE CONVERTER
 // ═══════════════════════════════════════════════════════════════
-function runConversion() {
+async function runConversion() {
   if (!state.lottieData) return;
   setStatus('orange', 'Converting…');
   state.reportItems = [];
 
   try {
-    const result = convertLottie(state.lottieData);
-    state.generatedHTML = result.html;
+    const optimise = document.getElementById('opt-optimise').checked;
+    const quality  = parseInt(document.getElementById('opt-quality').value);
 
-    // Update code tab
-    document.getElementById('code-output').textContent = result.html;
-    document.getElementById('code-label').textContent = 'index.html · ' + formatBytes(new Blob([result.html]).size);
+    // First pass: build assetMap from JSON/uploads
+    const result = convertLottie(state.lottieData, null);
 
-    // Update preview
-    showPreview(result.html, result.w, result.h);
+    // Optimise images if requested
+    if (optimise && Object.keys(result.assetMap).length > 0) {
+      setStatus('orange', 'Optimising images…');
+      const { optimised, stats } = await optimiseAssets(
+        result.assetMap,
+        state.lottieData,
+        quality,
+        (done, total, id) => {
+          if (total > 0) setStatus('orange', `Optimising images… ${done}/${total}${id ? ' · ' + id : ''}`);
+        }
+      );
 
-    // Update report
-    renderReport(result.report);
+      // Add optimisation stats to report
+      stats.forEach(s => {
+        const resizeNote = (s.srcW !== s.outW || s.srcH !== s.outH)
+          ? ` · resized ${s.srcW}×${s.srcH} → ${s.outW}×${s.outH}`
+          : '';
+        result.report.push({
+          type: 'ok',
+          name: s.id,
+          desc: `Optimised${resizeNote} · ${formatBytes(s.sizeBefore)} → ${formatBytes(s.sizeAfter)} (−${s.pct}%)`,
+        });
+      });
 
-    // Enable exports
+      // Second pass: rebuild HTML with optimised assets
+      const final = convertLottie(state.lottieData, optimised);
+      state.generatedHTML = final.html;
+      renderReport(final.report.concat(result.report.filter(r => r.type !== 'ok' || !stats.find(s => s.id === r.name))));
+    } else {
+      state.generatedHTML = result.html;
+      renderReport(result.report);
+    }
+
+    document.getElementById('code-output').textContent = state.generatedHTML;
+    document.getElementById('code-label').textContent = 'index.html · ' + formatBytes(new Blob([state.generatedHTML]).size);
+
+    showPreview(state.generatedHTML, result.w, result.h);
+
     document.getElementById('btn-export-html').disabled = false;
     document.getElementById('btn-export-zip').disabled = false;
 
-    const warns = result.report.filter(r => r.type === 'warn').length;
-    const skips = result.report.filter(r => r.type === 'skip').length;
-    setStatus('green', `Converted successfully · ${result.report.filter(r=>r.type==='ok').length} layers · ${warns} warnings · ${skips} skipped`);
+    const rep = result.report;
+    const warns = rep.filter(r => r.type === 'warn').length;
+    const skips = rep.filter(r => r.type === 'skip').length;
+    setStatus('green', `Converted · ${rep.filter(r=>r.type==='ok').length} layers · ${warns} warnings · ${skips} skipped · ${formatBytes(new Blob([state.generatedHTML]).size)}`);
 
-    // Switch to preview
     document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
     document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
     document.querySelector('[data-tab="preview"]').classList.add('active');
@@ -777,7 +829,7 @@ function runConversion() {
 // ═══════════════════════════════════════════════════════════════
 //  LOTTIE PARSER + CODE GENERATOR
 // ═══════════════════════════════════════════════════════════════
-function convertLottie(data) {
+function convertLottie(data, assetMapOverride) {
   const fps     = data.fr || 30;
   const totalF  = data.op || 0;
   const w       = data.w  || 300;
@@ -795,30 +847,29 @@ function convertLottie(data) {
   const layerDivs = [];
 
   // ── Resolve embedded assets from JSON ──────────────────────────
-  const assetMap = {};
-  if (data.assets) {
-    data.assets.forEach(asset => {
-      if (asset.p && asset.u !== undefined) {
-        // Image asset embedded in JSON
-        if (asset.p.startsWith('data:')) {
-          assetMap[asset.id] = asset.p;
-        } else {
-          // External reference — check our uploaded assets
-          const uploaded = state.assets[asset.p];
-          if (uploaded) {
-            assetMap[asset.id] = embed ? uploaded.dataUrl : asset.p;
+  const assetMap = assetMapOverride || {};
+  if (!assetMapOverride) {
+    if (data.assets) {
+      data.assets.forEach(asset => {
+        if (asset.p && asset.u !== undefined) {
+          if (asset.p.startsWith('data:')) {
+            assetMap[asset.id] = asset.p;
           } else {
-            assetMap[asset.id] = asset.p; // keep filename, user must supply
-            report.push({ type:'warn', name: asset.p, desc: 'Asset not found in uploaded files — using filename reference' });
+            const uploaded = state.assets[asset.p];
+            if (uploaded) {
+              assetMap[asset.id] = embed ? uploaded.dataUrl : asset.p;
+            } else {
+              assetMap[asset.id] = asset.p;
+              report.push({ type:'warn', name: asset.p, desc: 'Asset not found in uploaded files — using filename reference' });
+            }
           }
         }
-      }
+      });
+    }
+    Object.entries(state.assets).forEach(([name, info]) => {
+      if (!assetMap[name]) assetMap[name] = embed ? info.dataUrl : name;
     });
   }
-  // Also add directly uploaded assets
-  Object.entries(state.assets).forEach(([name, info]) => {
-    if (!assetMap[name]) assetMap[name] = embed ? info.dataUrl : name;
-  });
 
   // ── Process layers ──────────────────────────────────────────────
   const layers = [...(data.layers || [])].reverse(); // AE layers: index 0 = top, we reverse for z-order
@@ -858,7 +909,6 @@ function convertLottie(data) {
     const scaleKF = extractKeyframes(ks.s, fps, 'scale');
     const rotKF   = extractKeyframes(ks.r, fps, 'rotation');
     const opKF    = extractKeyframes(ks.o, fps, 'opacity');
-    const anchorKF = extractKeyframes(ks.a, fps, 'anchor');
 
     // Static values
     const posStatic   = getStaticValue(ks.p);
@@ -868,7 +918,20 @@ function convertLottie(data) {
     const anchorStatic = getStaticValue(ks.a);
 
     const anchor = anchorStatic || [0, 0];
-    const hasAnim = posKF.length > 1 || scaleKF.length > 1 || rotKF.length > 1 || opKF.length > 1;
+
+    // ── Correct AE transform formula:
+    //    translate(pos) rotate(r) scale(s) translate(-anchor)
+    //    transform-origin stays at 0 0 (top-left)
+    function makeTransform(pos, r, sc) {
+      const px = pos ? pos[0].toFixed(3) : '0';
+      const py = pos ? pos[1].toFixed(3) : '0';
+      const rx = r   ? r[0].toFixed(3)   : '0';
+      const sx = sc  ? (sc[0]/100).toFixed(5) : '1';
+      const sy = sc  ? (sc[1]/100).toFixed(5) : '1';
+      const ax = (-anchor[0]).toFixed(3);
+      const ay = (-anchor[1]).toFixed(3);
+      return `translate(${px}px,${py}px) rotate(${rx}deg) scale(${sx},${sy}) translate(${ax}px,${ay}px)`;
+    }
 
     // ── Build CSS ────────────────────────────────────────────────
     let animNames = [];
@@ -879,59 +942,59 @@ function convertLottie(data) {
     let animIter = [];
 
     const animDuration = outMs - inMs;
+    const hasTransformAnim = posKF.length > 1 || scaleKF.length > 1 || rotKF.length > 1;
 
-    if (posKF.length > 1) {
-      const name = layerId + '_pos';
-      cssBlocks.push(buildKeyframes(name, posKF, inMs, animDuration, (v) => {
-        const tx = (v[0] - anchor[0]);
-        const ty = (v[1] - anchor[1]);
-        return `transform: translate(${tx.toFixed(2)}px, ${ty.toFixed(2)}px) ${buildScaleRot(scaleStatic, rotStatic)}`;
-      }));
+    // Build a merged transform keyframe timeline when multiple properties animate
+    // This avoids CSS animation conflicts where two animations both set `transform`
+    if (hasTransformAnim) {
+      const name = layerId + '_tr';
+
+      // Collect all unique keyframe times from pos, scale, rot
+      const allTimes = new Set();
+      [...posKF, ...scaleKF, ...rotKF].forEach(kf => allTimes.add(kf.t));
+      const sortedTimes = [...allTimes].sort((a,b) => a-b);
+
+      // For each time, interpolate the value of each property
+      function interpKFs(kfs, t) {
+        if (!kfs || kfs.length === 0) return null;
+        if (kfs.length === 1) return kfs[0].v;
+        // Find surrounding keyframes
+        let before = kfs[0], after = kfs[kfs.length-1];
+        for (let i = 0; i < kfs.length - 1; i++) {
+          if (t >= kfs[i].t && t <= kfs[i+1].t) { before = kfs[i]; after = kfs[i+1]; break; }
+        }
+        if (t <= before.t) return before.v;
+        if (t >= after.t)  return after.v;
+        const ratio = (t - before.t) / (after.t - before.t);
+        return before.v.map((v, i) => v + (after.v[i] - v) * ratio);
+      }
+
+      const mergedKFs = sortedTimes.map(t => {
+        const pos = posKF.length > 1 ? interpKFs(posKF, t) : posStatic;
+        const sc  = scaleKF.length > 1 ? interpKFs(scaleKF, t) : scaleStatic;
+        const r   = rotKF.length > 1 ? interpKFs(rotKF, t) : rotStatic;
+        // Get easing from whichever animated property changed at this time
+        const kf = [...posKF, ...scaleKF, ...rotKF].find(k => k.t === t);
+        return { t, v: null, _pos: pos, _sc: sc, _r: r, easing: kf ? kf.easing : 'linear' };
+      });
+
+      cssBlocks.push(buildKeyframes(name, mergedKFs, inMs, animDuration, (v, kf) => {
+        return `transform: ${makeTransform(kf._pos, kf._r, kf._sc)}`;
+      }, true));
+
+      const easings = mergedKFs.map(k => k.easing || 'linear');
       animNames.push(name);
       animDurations.push(animDuration + 'ms');
       animDelays.push(inMs + 'ms');
       animFills.push('both');
-      animTimings.push('linear');
+      animTimings.push(easings[0] || 'linear');
       animIter.push(loop ? 'infinite' : '1');
     }
 
     if (opKF.length > 1) {
       const name = layerId + '_op';
       cssBlocks.push(buildKeyframes(name, opKF, inMs, animDuration, (v) => {
-        return `opacity: ${(v[0] / 100).toFixed(3)}`;
-      }));
-      animNames.push(name);
-      animDurations.push(animDuration + 'ms');
-      animDelays.push(inMs + 'ms');
-      animFills.push('both');
-      animTimings.push('linear');
-      animIter.push(loop ? 'infinite' : '1');
-    }
-
-    if (scaleKF.length > 1) {
-      const name = layerId + '_sc';
-      cssBlocks.push(buildKeyframes(name, scaleKF, inMs, animDuration, (v, pos, rot) => {
-        const sx = (v[0] / 100).toFixed(4);
-        const sy = (v[1] / 100).toFixed(4);
-        const r = rotStatic ? rotStatic[0].toFixed(2) : 0;
-        return `transform: translate(${posStatic ? (posStatic[0]-anchor[0]).toFixed(2) : 0}px, ${posStatic ? (posStatic[1]-anchor[1]).toFixed(2) : 0}px) scale(${sx}, ${sy}) rotate(${r}deg)`;
-      }));
-      animNames.push(name);
-      animDurations.push(animDuration + 'ms');
-      animDelays.push(inMs + 'ms');
-      animFills.push('both');
-      animTimings.push('linear');
-      animIter.push(loop ? 'infinite' : '1');
-    }
-
-    if (rotKF.length > 1) {
-      const name = layerId + '_rot';
-      cssBlocks.push(buildKeyframes(name, rotKF, inMs, animDuration, (v) => {
-        const px = posStatic ? (posStatic[0]-anchor[0]).toFixed(2) : 0;
-        const py = posStatic ? (posStatic[1]-anchor[1]).toFixed(2) : 0;
-        const sx = scaleStatic ? (scaleStatic[0]/100).toFixed(4) : 1;
-        const sy = scaleStatic ? (scaleStatic[1]/100).toFixed(4) : 1;
-        return `transform: translate(${px}px, ${py}px) scale(${sx},${sy}) rotate(${v[0].toFixed(2)}deg)`;
+        return `opacity: ${(v[0] / 100).toFixed(4)}`;
       }));
       animNames.push(name);
       animDurations.push(animDuration + 'ms');
@@ -942,17 +1005,15 @@ function convertLottie(data) {
     }
 
     // ── Initial static transform ─────────────────────────────────
-    const initPx = posStatic ? (posStatic[0] - anchor[0]).toFixed(2) : 0;
-    const initPy = posStatic ? (posStatic[1] - anchor[1]).toFixed(2) : 0;
-    const initSx = scaleStatic ? (scaleStatic[0]/100).toFixed(4) : 1;
-    const initSy = scaleStatic ? (scaleStatic[1]/100).toFixed(4) : 1;
-    const initR  = rotStatic   ? rotStatic[0].toFixed(2) : 0;
-    const initOp = opStatic    ? (opStatic[0] / 100).toFixed(3) : (layer.ip > 0 ? 0 : 1);
+    const initPos = posKF.length > 0 ? posKF[0].v : posStatic;
+    const initSc  = scaleKF.length > 0 ? scaleKF[0].v : scaleStatic;
+    const initR   = rotKF.length > 0 ? rotKF[0].v : rotStatic;
+    const initOp  = opStatic ? (opStatic[0] / 100).toFixed(4) : 1;
 
-    const initTransform = `translate(${initPx}px, ${initPy}px) scale(${initSx}, ${initSy}) rotate(${initR}deg)`;
+    const initTransform = makeTransform(initPos, initR, initSc);
 
-    // Visibility: hidden until inMs
-    const visStyle = layer.ip > 0 ? `opacity:${initOp};` : `opacity:${initOp};`;
+    // Layer hidden before ip (ip < 0 means visible from frame 0)
+    const visStyle = `opacity:${initOp};`;
 
     // ── Determine content ────────────────────────────────────────
     let innerContent = '';
@@ -973,14 +1034,18 @@ function convertLottie(data) {
       // Text layer
       const textData = layer.t && layer.t.d && layer.t.d.k && layer.t.d.k[0] && layer.t.d.k[0].s;
       if (textData) {
-        const txt   = (textData.t || '').replace(/\r/g,'<br>');
+        const txt   = (textData.t || '').replace(/\r/g, '\n');
         const fs    = textData.s || 16;
+        const lh    = textData.lh || Math.round(fs * 1.2);
         const fc    = textData.fc ? rgbaToCSS(textData.fc) : '#000';
         const ff    = textData.f || 'Arial';
-        const fwMap = { Regular:400, Bold:700, Light:300, Medium:500 };
-        const fw    = fwMap[textData.f?.split('-').pop()] || 400;
-        innerContent = `<div style="font-size:${fs}px;color:${fc};font-family:'${ff.split('-')[0]}',sans-serif;font-weight:${fw};white-space:pre;">${txt}</div>`;
-        report.push({ type:'ok', name: layer.nm || 'text', desc: `Text layer → HTML div (font: ${ff}, ${fs}px)` });
+        const fwMap = { Regular:400, Bold:700, Light:300, Medium:500, Black:900 };
+        const fw    = fwMap[ff.split('-').pop()] || 400;
+        // j: 0=left, 1=right, 2=center, 3=justify
+        const jMap  = { 0:'left', 1:'right', 2:'center', 3:'justify' };
+        const ta    = jMap[textData.j] || 'left';
+        innerContent = `<div style="font-size:${fs}px;line-height:${lh}px;color:${fc};font-family:'${ff.split('-')[0]}',sans-serif;font-weight:${fw};text-align:${ta};white-space:pre-line;">${txt}</div>`;
+        report.push({ type:'ok', name: layer.nm || 'text', desc: `Text layer → div (${ff}, ${fs}px, align:${ta})` });
       } else {
         report.push({ type:'warn', name: layer.nm || 'text', desc: 'Text layer — could not extract text data' });
       }
@@ -1019,19 +1084,25 @@ function convertLottie(data) {
 
     const zIndex = layers.length - idx;
 
-    // Per-layer CSS
+    // Per-layer CSS — transform-origin always 0 0 because the AE formula
+    // already bakes the anchor via translate(-anchor) at the end
     cssBlocks.push(`
 #${layerId} {
   position: absolute;
   top: 0; left: 0;
-  transform-origin: ${anchor[0]}px ${anchor[1]}px;
+  transform-origin: 0 0;
   transform: ${initTransform};
   ${visStyle}
   z-index: ${zIndex};
   ${extraStyle}${animCSS}
 }`);
 
-    layerDivs.push(`  <div id="${layerId}">${innerContent}</div>`);
+    // Use <img> directly for image layers (no wrapping div)
+    if (layerType === 2 && innerContent.startsWith('<img')) {
+      layerDivs.push(`  ${innerContent.replace('<img ', `<img id="${layerId}" `)}`);
+    } else {
+      layerDivs.push(`  <div id="${layerId}">${innerContent}</div>`);
+    }
   });
 
   // ── clickTag snippet ───────────────────────────────────────────
@@ -1088,7 +1159,7 @@ ${clickTagSnippet}
   // Clean up duplicated @keyframes from cssBlocks (we embedded them in <style> body above already)
   const cleanedHTML = buildCleanHTML(data, fps, w, h, layers, cssBlocks, layerDivs, clickTagSnippet, retina, scaleStyle, loop);
 
-  return { html: cleanedHTML, w, h, report };
+  return { html: cleanedHTML, w, h, report, assetMap };
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -1147,8 +1218,139 @@ ${clickTagSnippet}
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  KEYFRAME HELPERS
+//  IMAGE OPTIMISATION
 // ═══════════════════════════════════════════════════════════════
+
+// Calculates the maximum rendered pixel size of an image asset
+// across all layers and all keyframes, accounting for scale
+function calcMaxRenderSize(assetId, data) {
+  const fps = data.fr || 30;
+  const compW = data.w || 300;
+  const compH = data.h || 300;
+
+  let maxScale = 0;
+
+  (data.layers || []).forEach(layer => {
+    if (layer.ty !== 2 || layer.refId !== assetId) return;
+
+    const ks = layer.ks || {};
+    const scaleKF = extractKeyframes(ks.s, fps, 'scale');
+    const scaleStatic = getStaticValue(ks.s);
+
+    let layerMaxScale = 0;
+    if (scaleKF.length > 1) {
+      scaleKF.forEach(kf => {
+        const s = Math.max(Math.abs(kf.v[0]), Math.abs(kf.v[1]));
+        if (s > layerMaxScale) layerMaxScale = s;
+      });
+    } else if (scaleStatic) {
+      layerMaxScale = Math.max(Math.abs(scaleStatic[0]), Math.abs(scaleStatic[1]));
+    } else {
+      layerMaxScale = 100;
+    }
+    if (layerMaxScale > maxScale) maxScale = layerMaxScale;
+  });
+
+  if (maxScale === 0) maxScale = 100;
+  return maxScale / 100; // as multiplier
+}
+
+// Resizes and converts a dataURL image to WebP via canvas
+// targetW/targetH: max dimensions after scaling
+function optimiseImage(dataUrl, targetW, targetH, quality) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const srcW = img.naturalWidth;
+      const srcH = img.naturalHeight;
+
+      // Only downscale, never upscale
+      const scaleW = targetW < srcW ? targetW / srcW : 1;
+      const scaleH = targetH < srcH ? targetH / srcH : 1;
+      const scale  = Math.min(scaleW, scaleH);
+
+      const outW = Math.max(1, Math.round(srcW * scale));
+      const outH = Math.max(1, Math.round(srcH * scale));
+
+      const canvas = document.createElement('canvas');
+      canvas.width  = outW;
+      canvas.height = outH;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, outW, outH);
+
+      const webpUrl = canvas.toDataURL('image/webp', quality / 100);
+
+      // Fallback: if browser doesn't support WebP output, keep original format
+      if (webpUrl === 'data:,') {
+        resolve({ dataUrl, outW: srcW, outH: srcH, optimised: false });
+      } else {
+        resolve({ dataUrl: webpUrl, outW, outH, optimised: true, srcW, srcH });
+      }
+    };
+    img.onerror = () => reject(new Error('Image load failed'));
+    img.src = dataUrl;
+  });
+}
+
+// Runs optimisation on all assets in assetMap, returns optimised map + stats
+async function optimiseAssets(assetMap, data, quality, onProgress) {
+  const optimised = {};
+  const stats = [];
+  const entries = Object.entries(assetMap);
+
+  for (let i = 0; i < entries.length; i++) {
+    const [id, dataUrl] = entries[i];
+    onProgress(i, entries.length, id);
+
+    if (!dataUrl.startsWith('data:image/')) {
+      optimised[id] = dataUrl;
+      continue;
+    }
+
+    // Find source asset dimensions
+    const asset = (data.assets || []).find(a => a.id === id);
+    const srcW = asset ? asset.w : null;
+    const srcH = asset ? asset.h : null;
+
+    if (!srcW || !srcH) {
+      optimised[id] = dataUrl;
+      continue;
+    }
+
+    // Max scale this asset is rendered at
+    const maxScale = calcMaxRenderSize(id, data);
+
+    // Target: native pixel size × max scale, capped at original
+    const targetW = Math.min(srcW, Math.ceil(srcW * maxScale));
+    const targetH = Math.min(srcH, Math.ceil(srcH * maxScale));
+
+    try {
+      const sizeBefore = Math.round(dataUrl.length * 0.75); // approx bytes from base64
+      const result = await optimiseImage(dataUrl, targetW, targetH, quality);
+      const sizeAfter = Math.round(result.dataUrl.length * 0.75);
+      const saving = sizeBefore - sizeAfter;
+
+      optimised[id] = result.dataUrl;
+      stats.push({
+        id,
+        srcW, srcH,
+        outW: result.outW, outH: result.outH,
+        sizeBefore, sizeAfter,
+        saving,
+        pct: Math.round((saving / sizeBefore) * 100),
+        optimised: result.optimised,
+      });
+    } catch(e) {
+      optimised[id] = dataUrl;
+    }
+
+    // Yield to UI thread between images
+    await new Promise(r => setTimeout(r, 0));
+  }
+
+  onProgress(entries.length, entries.length, '');
+  return { optimised, stats };
+}
 function extractKeyframes(prop, fps, type) {
   if (!prop) return [];
   // Unanimated
@@ -1189,14 +1391,15 @@ function bezierFromKF(kf) {
   return `cubic-bezier(${f(ox)},${f(oy)},${f(ix)},${f(iy)})`;
 }
 
-function buildKeyframes(name, keyframes, inMs, duration, valueToCSS) {
+function buildKeyframes(name, keyframes, inMs, duration, valueToCSS, isMerged) {
   if (keyframes.length <= 1) return '';
   let lines = [`@keyframes ${name} {`];
   keyframes.forEach((kf, i) => {
     const relMs = kf.t - inMs;
     const pct   = duration > 0 ? Math.round((relMs / duration) * 10000) / 100 : 0;
     const safePct = Math.max(0, Math.min(100, pct));
-    const cssVal = valueToCSS(kf.v, kf);
+    // For merged transform KFs, pass full kf; for others pass kf.v
+    const cssVal = isMerged ? valueToCSS(null, kf) : valueToCSS(kf.v, kf);
     lines.push(`  ${safePct}% { ${cssVal}; ${kf.easing && kf.easing !== 'linear' ? 'animation-timing-function:' + kf.easing + ';' : ''} }`);
   });
   lines.push('}');
@@ -1269,9 +1472,23 @@ function showPreview(html, w, h) {
   placeholder.style.display = 'none';
   container.style.display   = 'flex';
 
-  // Safari file:// compatible — use srcdoc instead of blob URL
+  // Store for replay
+  state._previewHTML = html;
+  state._previewW = w;
+  state._previewH = h;
+
+  loadPreviewIframe(iframe, html);
+}
+
+function loadPreviewIframe(iframe, html) {
   iframe.removeAttribute('src');
   iframe.srcdoc = html;
+}
+
+function replayPreview() {
+  if (!state._previewHTML) return;
+  const iframe = document.getElementById('preview-iframe');
+  loadPreviewIframe(iframe, state._previewHTML);
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -1326,49 +1543,167 @@ function exportHTML() {
   download(state.lottieFileName + '_320x480_DE.html', state.generatedHTML, 'text/html');
 }
 
+// ── Minimal ZIP builder (no external dependencies) ──────────────
+// Implements ZIP store (no compression) — sufficient for ad delivery
+function buildZIP(files) {
+  // files: Array of { name: string, data: Uint8Array }
+  const encoder = new TextEncoder();
+  const localHeaders = [];
+  const centralDirectory = [];
+  let offset = 0;
+
+  function crc32(data) {
+    let crc = 0xFFFFFFFF;
+    const table = crc32.table || (crc32.table = (() => {
+      const t = new Uint32Array(256);
+      for (let i = 0; i < 256; i++) {
+        let c = i;
+        for (let j = 0; j < 8; j++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+        t[i] = c;
+      }
+      return t;
+    })());
+    for (let i = 0; i < data.length; i++) crc = table[(crc ^ data[i]) & 0xFF] ^ (crc >>> 8);
+    return (crc ^ 0xFFFFFFFF) >>> 0;
+  }
+
+  function u16(n) { return [(n & 0xFF), (n >> 8) & 0xFF]; }
+  function u32(n) { const v = n >>> 0; return [v & 0xFF, (v>>8)&0xFF, (v>>16)&0xFF, (v>>24)&0xFF]; }
+
+  const parts = [];
+
+  files.forEach(file => {
+    const nameBytes = encoder.encode(file.name);
+    const data = file.data;
+    const crc = crc32(data);
+    const size = data.length;
+    const date = 0x5270, time = 0x0000; // fixed date
+
+    // Local file header
+    const lh = [
+      0x50,0x4B,0x03,0x04, // signature
+      0x14,0x00,           // version needed: 2.0
+      0x00,0x00,           // flags
+      0x00,0x00,           // compression: store
+      ...u16(time), ...u16(date),
+      ...u32(crc),
+      ...u32(size), ...u32(size), // compressed = uncompressed
+      ...u16(nameBytes.length),
+      0x00,0x00,           // extra field length
+      ...nameBytes,
+    ];
+
+    // Central directory entry
+    const cd = [
+      0x50,0x4B,0x01,0x02, // signature
+      0x3F,0x00,           // version made by
+      0x14,0x00,           // version needed
+      0x00,0x00,           // flags
+      0x00,0x00,           // compression: store
+      ...u16(time), ...u16(date),
+      ...u32(crc),
+      ...u32(size), ...u32(size),
+      ...u16(nameBytes.length),
+      0x00,0x00,           // extra
+      0x00,0x00,           // comment
+      0x00,0x00,           // disk start
+      0x00,0x00,           // internal attr
+      0x00,0x00,0x00,0x00, // external attr
+      ...u32(offset),      // local header offset
+      ...nameBytes,
+    ];
+
+    localHeaders.push(new Uint8Array(lh));
+    parts.push(data);
+    centralDirectory.push(new Uint8Array(cd));
+    offset += lh.length + size;
+  });
+
+  const cdOffset = offset;
+  const cdData = centralDirectory.flatMap(b => [...b]);
+  const cdSize = cdData.length;
+
+  const eocd = [
+    0x50,0x4B,0x05,0x06, // signature
+    0x00,0x00,           // disk number
+    0x00,0x00,           // disk with cd
+    ...u16(files.length), ...u16(files.length),
+    ...u32(cdSize),
+    ...u32(cdOffset),
+    0x00,0x00,           // comment length
+  ];
+
+  // Assemble
+  const totalSize = localHeaders.reduce((s,h,i) => s + h.length + parts[i].length, 0) + cdSize + eocd.length;
+  const out = new Uint8Array(totalSize);
+  let pos = 0;
+  localHeaders.forEach((h, i) => {
+    out.set(h, pos); pos += h.length;
+    out.set(parts[i], pos); pos += parts[i].length;
+  });
+  out.set(new Uint8Array(cdData), pos); pos += cdSize;
+  out.set(new Uint8Array(eocd), pos);
+  return out;
+}
+
 async function exportZIP() {
   if (!state.generatedHTML) return;
-  // Use a simple zip via fflate (loaded inline)
-  setStatus('orange', 'Building ZIP…');
+
+  const folderName = state.lottieFileName || 'ad';
+  const encoder = new TextEncoder();
+
+  // Progress UI
+  const statusEl = document.getElementById('status-text');
+  const dotEl = document.getElementById('status-dot');
+  dotEl.className = 'dot orange';
+
+  const filesToZip = [];
+  const assetEntries = Object.entries(state.assets);
+  const total = 1 + assetEntries.length;
+  let done = 0;
+
+  function updateProgress() {
+    done++;
+    const pct = Math.round((done / total) * 100);
+    statusEl.textContent = `Building ZIP… ${pct}%`;
+  }
+
   try {
-    const script = document.createElement('script');
-    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/fflate/0.8.2/fflate.min.js';
-    document.head.appendChild(script);
-    script.onload = () => {
-      const files = {};
-      const folderName = state.lottieFileName || 'ad';
+    // HTML file
+    filesToZip.push({ name: `${folderName}/index.html`, data: encoder.encode(state.generatedHTML) });
+    updateProgress();
 
-      // index.html with relative asset references (non-embedded version)
-      const htmlForZip = state.generatedHTML;
-      files[`${folderName}/index.html`] = fflate.strToU8(htmlForZip);
+    // Asset files
+    for (const [name, info] of assetEntries) {
+      const b64 = info.dataUrl.split(',')[1];
+      const bin = atob(b64);
+      const arr = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+      filesToZip.push({ name: `${folderName}/${name}`, data: arr });
+      updateProgress();
+      // Yield to UI thread
+      await new Promise(r => setTimeout(r, 0));
+    }
 
-      // Add asset files
-      Object.entries(state.assets).forEach(([name, info]) => {
-        // Convert dataURL to Uint8Array
-        const b64 = info.dataUrl.split(',')[1];
-        const bin = atob(b64);
-        const arr = new Uint8Array(bin.length);
-        for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
-        files[`${folderName}/${name}`] = arr;
-      });
+    const zipData = buildZIP(filesToZip);
 
-      fflate.zip(files, (err, data) => {
-        if (err) { setStatus('red', 'ZIP error: ' + err); return; }
-        // Convert to base64 data URI for Safari file:// compatibility
-        let binary = '';
-        const bytes = new Uint8Array(data);
-        for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
-        const b64 = btoa(binary);
-        const a = document.createElement('a');
-        a.href = 'data:application/zip;base64,' + b64;
-        a.download = folderName + '.zip'; a.click();
-        setStatus('green', 'ZIP downloaded');
-      });
-    };
+    // Convert to base64 for Safari file:// compatibility
+    let binary = '';
+    const chunk = 8192;
+    for (let i = 0; i < zipData.length; i += chunk) {
+      binary += String.fromCharCode(...zipData.subarray(i, i + chunk));
+      if (i % 65536 === 0) await new Promise(r => setTimeout(r, 0));
+    }
+    const b64 = btoa(binary);
+    const a = document.createElement('a');
+    a.href = 'data:application/zip;base64,' + b64;
+    a.download = folderName + '.zip';
+    a.click();
+    setStatus('green', `ZIP downloaded · ${filesToZip.length} files`);
+
   } catch(e) {
-    // Fallback: just download HTML
-    exportHTML();
-    setStatus('yellow', 'ZIP library unavailable — downloaded HTML instead');
+    setStatus('red', 'ZIP error: ' + e.message);
+    console.error(e);
   }
 }
 
