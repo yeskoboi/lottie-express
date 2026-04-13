@@ -458,7 +458,8 @@
   </div>
   <div class="header-right">
     <span class="tag">native CSS/JS</span>
-    <span class="tag">no dependencies</span>
+    <span class="tag">parenting</span>
+    <span class="tag">precomps</span>
     <span class="tag">IAB compliant</span>
   </div>
 </header>
@@ -871,222 +872,210 @@ function convertLottie(data, assetMapOverride) {
     });
   }
 
-  // ── Process layers ──────────────────────────────────────────────
-  const layers = [...(data.layers || [])].reverse(); // AE layers: index 0 = top, we reverse for z-order
+  // ── Process layers with Parenting + Precomp support ─────────
+  const compDurationMs = Math.round((totalF / fps) * 1000);
 
-  layers.forEach((layer, idx) => {
-    const layerId = 'layer_' + idx + '_' + safeName(layer.nm || 'layer');
-    const inMs  = Math.round((layer.ip / fps) * 1000);
-    const outMs = Math.round((layer.op / fps) * 1000);
-    const startMs = Math.round(((layer.st || 0) / fps) * 1000);
+  // Recursive layer processor — used for both root comp and precomps
+  function processLayers(srcLayers, compData, prefix, depth) {
+    const layers = [...(srcLayers || [])].reverse();
+    const processed = []; // { id, parentInd, zIndex, css, html, layer }
 
-    // ── Unsupported layer types ──
-    // 0=Precomp, 1=Solid, 2=Image, 3=Null, 4=Shape, 5=Text, 6=Audio
-    const layerType = layer.ty;
-    if (layerType === 6) {
-      report.push({ type:'skip', name: layer.nm || 'layer', desc: 'Audio layer — skipped (not supported in HTML5 ads)' });
-      return;
-    }
-    if (layerType === 4) {
-      report.push({ type:'warn', name: layer.nm || 'layer', desc: 'Shape layer — basic transform supported, vector paths not rendered' });
-    }
+    layers.forEach((layer, idx) => {
+      const layerId = prefix + 'l' + idx + '_' + safeName(layer.nm || 'layer');
+      const ipClamped = Math.max(0, layer.ip || 0);
+      const opClamped = Math.min(totalF, layer.op || totalF);
+      const inMs  = Math.round((ipClamped / fps) * 1000);
+      const outMs = Math.min(Math.round((opClamped / fps) * 1000), compDurationMs);
 
-    // ── Check for unsupported features ──
-    if (layer.ef && layer.ef.length > 0) {
-      report.push({ type:'warn', name: layer.nm || 'layer', desc: `Effects (${layer.ef.map(e=>e.nm).join(', ')}) — not supported, skipped` });
-    }
-    if (layer.tt) {
-      report.push({ type:'warn', name: layer.nm || 'layer', desc: 'Track matte — not supported, layer will render without matte' });
-    }
-    if (layer.hasMask) {
-      report.push({ type:'warn', name: layer.nm || 'layer', desc: 'Mask — not supported in CSS, skipped' });
-    }
+      const layerType = layer.ty;
+      if (layerType === 6) {
+        report.push({ type:'skip', name: layer.nm || 'layer', desc: 'Audio layer — skipped' });
+        return;
+      }
+      if (layerType === 4) {
+        report.push({ type:'warn', name: layer.nm || 'layer', desc: 'Shape layer — basic transform supported, vector paths not rendered' });
+      }
+      if (layer.ef && layer.ef.length > 0) {
+        report.push({ type:'warn', name: layer.nm || 'layer', desc: `Effects (${layer.ef.map(e=>e.nm).join(', ')}) — not supported, skipped` });
+      }
+      if (layer.tt) {
+        report.push({ type:'warn', name: layer.nm || 'layer', desc: 'Track matte — not supported, layer will render without matte' });
+      }
+      if (layer.hasMask) {
+        report.push({ type:'warn', name: layer.nm || 'layer', desc: 'Mask — not supported in CSS, skipped' });
+      }
 
-    // ── Transform keyframes ──────────────────────────────────────
-    const ks = layer.ks || {};
+      // ── Transform ──
+      const ks = layer.ks || {};
+      const posKF   = extractKeyframes(ks.p, fps, 'position');
+      const scaleKF = extractKeyframes(ks.s, fps, 'scale');
+      const rotKF   = extractKeyframes(ks.r, fps, 'rotation');
+      const opKF    = extractKeyframes(ks.o, fps, 'opacity');
+      const posStatic   = getStaticValue(ks.p);
+      const scaleStatic = getStaticValue(ks.s);
+      const rotStatic   = getStaticValue(ks.r);
+      const opStatic    = getStaticValue(ks.o);
+      const anchorStatic = getStaticValue(ks.a);
+      const anchor = anchorStatic || [0, 0];
 
-    const posKF   = extractKeyframes(ks.p, fps, 'position');
-    const scaleKF = extractKeyframes(ks.s, fps, 'scale');
-    const rotKF   = extractKeyframes(ks.r, fps, 'rotation');
-    const opKF    = extractKeyframes(ks.o, fps, 'opacity');
+      function makeTransform(pos, r, sc) {
+        const px = pos ? pos[0].toFixed(3) : '0';
+        const py = pos ? pos[1].toFixed(3) : '0';
+        const rx = r   ? r[0].toFixed(3)   : '0';
+        const sx = sc  ? (sc[0]/100).toFixed(5) : '1';
+        const sy = sc  ? (sc[1]/100).toFixed(5) : '1';
+        const ax = (-anchor[0]).toFixed(3);
+        const ay = (-anchor[1]).toFixed(3);
+        return `translate(${px}px,${py}px) rotate(${rx}deg) scale(${sx},${sy}) translate(${ax}px,${ay}px)`;
+      }
 
-    // Static values
-    const posStatic   = getStaticValue(ks.p);
-    const scaleStatic = getStaticValue(ks.s);
-    const rotStatic   = getStaticValue(ks.r);
-    const opStatic    = getStaticValue(ks.o);
-    const anchorStatic = getStaticValue(ks.a);
+      // ── Animation keyframes ──
+      let animNames = [], animDurations = [], animDelays = [], animFills = [], animTimings = [], animIter = [];
+      const hasTransformAnim = posKF.length > 1 || scaleKF.length > 1 || rotKF.length > 1;
 
-    const anchor = anchorStatic || [0, 0];
+      if (hasTransformAnim) {
+        const name = layerId + '_tr';
+        const allTimes = new Set();
+        [...posKF, ...scaleKF, ...rotKF].forEach(kf => allTimes.add(kf.t));
+        const sortedTimes = [...allTimes].sort((a,b) => a-b);
 
-    // ── Correct AE transform formula:
-    //    translate(pos) rotate(r) scale(s) translate(-anchor)
-    //    transform-origin stays at 0 0 (top-left)
-    function makeTransform(pos, r, sc) {
-      const px = pos ? pos[0].toFixed(3) : '0';
-      const py = pos ? pos[1].toFixed(3) : '0';
-      const rx = r   ? r[0].toFixed(3)   : '0';
-      const sx = sc  ? (sc[0]/100).toFixed(5) : '1';
-      const sy = sc  ? (sc[1]/100).toFixed(5) : '1';
-      const ax = (-anchor[0]).toFixed(3);
-      const ay = (-anchor[1]).toFixed(3);
-      return `translate(${px}px,${py}px) rotate(${rx}deg) scale(${sx},${sy}) translate(${ax}px,${ay}px)`;
-    }
-
-    // ── Build CSS ────────────────────────────────────────────────
-    let animNames = [];
-    let animDurations = [];
-    let animDelays = [];
-    let animFills = [];
-    let animTimings = [];
-    let animIter = [];
-
-    const animDuration = outMs - inMs;
-    const hasTransformAnim = posKF.length > 1 || scaleKF.length > 1 || rotKF.length > 1;
-
-    // Build a merged transform keyframe timeline when multiple properties animate
-    // This avoids CSS animation conflicts where two animations both set `transform`
-    if (hasTransformAnim) {
-      const name = layerId + '_tr';
-
-      // Collect all unique keyframe times from pos, scale, rot
-      const allTimes = new Set();
-      [...posKF, ...scaleKF, ...rotKF].forEach(kf => allTimes.add(kf.t));
-      const sortedTimes = [...allTimes].sort((a,b) => a-b);
-
-      // For each time, interpolate the value of each property
-      function interpKFs(kfs, t) {
-        if (!kfs || kfs.length === 0) return null;
-        if (kfs.length === 1) return kfs[0].v;
-        // Find surrounding keyframes
-        let before = kfs[0], after = kfs[kfs.length-1];
-        for (let i = 0; i < kfs.length - 1; i++) {
-          if (t >= kfs[i].t && t <= kfs[i+1].t) { before = kfs[i]; after = kfs[i+1]; break; }
+        function interpKFs(kfs, t) {
+          if (!kfs || kfs.length === 0) return null;
+          if (kfs.length === 1) return kfs[0].v;
+          let before = kfs[0], after = kfs[kfs.length-1];
+          for (let i = 0; i < kfs.length - 1; i++) {
+            if (t >= kfs[i].t && t <= kfs[i+1].t) { before = kfs[i]; after = kfs[i+1]; break; }
+          }
+          if (t <= before.t) return before.v;
+          if (t >= after.t)  return after.v;
+          const ratio = (t - before.t) / (after.t - before.t);
+          return before.v.map((v, i) => v + (after.v[i] - v) * ratio);
         }
-        if (t <= before.t) return before.v;
-        if (t >= after.t)  return after.v;
-        const ratio = (t - before.t) / (after.t - before.t);
-        return before.v.map((v, i) => v + (after.v[i] - v) * ratio);
+
+        const mergedKFs = sortedTimes.map(t => {
+          const pos = posKF.length > 1 ? interpKFs(posKF, t) : posStatic;
+          const sc  = scaleKF.length > 1 ? interpKFs(scaleKF, t) : scaleStatic;
+          const r   = rotKF.length > 1 ? interpKFs(rotKF, t) : rotStatic;
+          const kf = [...posKF, ...scaleKF, ...rotKF].find(k => k.t === t);
+          return { t, v: null, _pos: pos, _sc: sc, _r: r, easing: kf ? kf.easing : 'linear' };
+        });
+
+        cssBlocks.push(buildKeyframes(name, mergedKFs, 0, compDurationMs, (v, kf) => {
+          return `transform: ${makeTransform(kf._pos, kf._r, kf._sc)}`;
+        }, true));
+
+        animNames.push(name);
+        animDurations.push(compDurationMs + 'ms');
+        animDelays.push('0ms');
+        animFills.push('both');
+        animTimings.push(mergedKFs[0]?.easing || 'linear');
+        animIter.push(loop ? 'infinite' : '1');
       }
 
-      const mergedKFs = sortedTimes.map(t => {
-        const pos = posKF.length > 1 ? interpKFs(posKF, t) : posStatic;
-        const sc  = scaleKF.length > 1 ? interpKFs(scaleKF, t) : scaleStatic;
-        const r   = rotKF.length > 1 ? interpKFs(rotKF, t) : rotStatic;
-        // Get easing from whichever animated property changed at this time
-        const kf = [...posKF, ...scaleKF, ...rotKF].find(k => k.t === t);
-        return { t, v: null, _pos: pos, _sc: sc, _r: r, easing: kf ? kf.easing : 'linear' };
-      });
-
-      cssBlocks.push(buildKeyframes(name, mergedKFs, inMs, animDuration, (v, kf) => {
-        return `transform: ${makeTransform(kf._pos, kf._r, kf._sc)}`;
-      }, true));
-
-      const easings = mergedKFs.map(k => k.easing || 'linear');
-      animNames.push(name);
-      animDurations.push(animDuration + 'ms');
-      animDelays.push(inMs + 'ms');
-      animFills.push('both');
-      animTimings.push(easings[0] || 'linear');
-      animIter.push(loop ? 'infinite' : '1');
-    }
-
-    if (opKF.length > 1) {
-      const name = layerId + '_op';
-      cssBlocks.push(buildKeyframes(name, opKF, inMs, animDuration, (v) => {
-        return `opacity: ${(v[0] / 100).toFixed(4)}`;
-      }));
-      animNames.push(name);
-      animDurations.push(animDuration + 'ms');
-      animDelays.push(inMs + 'ms');
-      animFills.push('both');
-      animTimings.push('linear');
-      animIter.push(loop ? 'infinite' : '1');
-    }
-
-    // ── Initial static transform ─────────────────────────────────
-    const initPos = posKF.length > 0 ? posKF[0].v : posStatic;
-    const initSc  = scaleKF.length > 0 ? scaleKF[0].v : scaleStatic;
-    const initR   = rotKF.length > 0 ? rotKF[0].v : rotStatic;
-    const initOp  = opStatic ? (opStatic[0] / 100).toFixed(4) : 1;
-
-    const initTransform = makeTransform(initPos, initR, initSc);
-
-    // Layer hidden before ip (ip < 0 means visible from frame 0)
-    const visStyle = `opacity:${initOp};`;
-
-    // ── Determine content ────────────────────────────────────────
-    let innerContent = '';
-    let extraStyle = '';
-
-    if (layerType === 2) {
-      // Image layer
-      const refId = layer.refId;
-      const src = assetMap[refId] || refId || '';
-      const imgAsset = data.assets ? data.assets.find(a => a.id === refId) : null;
-      const imgW = imgAsset ? imgAsset.w : 'auto';
-      const imgH = imgAsset ? imgAsset.h : 'auto';
-      innerContent = `<img src="${src}" width="${imgW}" height="${imgH}" style="display:block;max-width:none;" alt="" />`;
-      extraStyle = `width:${imgW}px;height:${imgH}px;`;
-      report.push({ type:'ok', name: layer.nm || 'image', desc: `Image layer → <img> tag` });
-
-    } else if (layerType === 5) {
-      // Text layer
-      const textData = layer.t && layer.t.d && layer.t.d.k && layer.t.d.k[0] && layer.t.d.k[0].s;
-      if (textData) {
-        const txt   = (textData.t || '').replace(/\r/g, '\n');
-        const fs    = textData.s || 16;
-        const lh    = textData.lh || Math.round(fs * 1.2);
-        const fc    = textData.fc ? rgbaToCSS(textData.fc) : '#000';
-        const ff    = textData.f || 'Arial';
-        const fwMap = { Regular:400, Bold:700, Light:300, Medium:500, Black:900 };
-        const fw    = fwMap[ff.split('-').pop()] || 400;
-        // j: 0=left, 1=right, 2=center, 3=justify
-        const jMap  = { 0:'left', 1:'right', 2:'center', 3:'justify' };
-        const ta    = jMap[textData.j] || 'left';
-        innerContent = `<div style="font-size:${fs}px;line-height:${lh}px;color:${fc};font-family:'${ff.split('-')[0]}',sans-serif;font-weight:${fw};text-align:${ta};white-space:pre-line;">${txt}</div>`;
-        report.push({ type:'ok', name: layer.nm || 'text', desc: `Text layer → div (${ff}, ${fs}px, align:${ta})` });
-      } else {
-        report.push({ type:'warn', name: layer.nm || 'text', desc: 'Text layer — could not extract text data' });
+      if (opKF.length > 1) {
+        const name = layerId + '_op';
+        cssBlocks.push(buildKeyframes(name, opKF, 0, compDurationMs, (v) => {
+          return `opacity: ${(v[0] / 100).toFixed(4)}`;
+        }));
+        animNames.push(name);
+        animDurations.push(compDurationMs + 'ms');
+        animDelays.push('0ms');
+        animFills.push('both');
+        animTimings.push('linear');
+        animIter.push(loop ? 'infinite' : '1');
       }
 
-    } else if (layerType === 1) {
-      // Solid layer
-      const sc = layer.sc || '#000000';
-      const sw = layer.sw || w;
-      const sh = layer.sh || h;
-      extraStyle = `width:${sw}px;height:${sh}px;background:${sc};`;
-      report.push({ type:'ok', name: layer.nm || 'solid', desc: `Solid layer → colored div (${sc})` });
+      const initPos = posKF.length > 0 ? posKF[0].v : posStatic;
+      const initSc  = scaleKF.length > 0 ? scaleKF[0].v : scaleStatic;
+      const initR   = rotKF.length > 0 ? rotKF[0].v : rotStatic;
+      const initOp  = opStatic ? (opStatic[0] / 100).toFixed(4) : 1;
+      const initTransform = makeTransform(initPos, initR, initSc);
+      const visStyle = `opacity:${initOp};`;
 
-    } else if (layerType === 0) {
-      // Precomp
-      report.push({ type:'warn', name: layer.nm || 'precomp', desc: 'Precomposition — renders as empty div (nested compositions not yet supported)' });
-    } else if (layerType === 3) {
-      // Null — just a transform container
-      extraStyle = 'pointer-events:none;';
-      report.push({ type:'ok', name: layer.nm || 'null', desc: 'Null layer → invisible transform container' });
-    } else if (layerType === 4) {
-      // Shape — placeholder
-      extraStyle = 'pointer-events:none;';
-    }
+      // ── Content ──
+      let innerContent = '';
+      let extraStyle = '';
+      let childrenHTML = '';
 
-    // ── Build animation CSS ───────────────────────────────────────
-    let animCSS = '';
-    if (animNames.length > 0) {
-      animCSS = `
+      if (layerType === 2) {
+        const refId = layer.refId;
+        const src = assetMap[refId] || refId || '';
+        const imgAsset = compData.assets ? compData.assets.find(a => a.id === refId) : null;
+        const imgW = imgAsset ? imgAsset.w : 'auto';
+        const imgH = imgAsset ? imgAsset.h : 'auto';
+        innerContent = `<img src="${src}" width="${imgW}" height="${imgH}" style="display:block;max-width:none;" alt="" />`;
+        extraStyle = `width:${imgW}px;height:${imgH}px;`;
+        report.push({ type:'ok', name: layer.nm || 'image', desc: `Image layer → <img> tag` });
+
+      } else if (layerType === 5) {
+        const textData = layer.t && layer.t.d && layer.t.d.k && layer.t.d.k[0] && layer.t.d.k[0].s;
+        if (textData) {
+          const txt   = (textData.t || '').replace(/\r/g, '\n');
+          const fs    = textData.s || 16;
+          const lh    = textData.lh || Math.round(fs * 1.2);
+          const fc    = textData.fc ? rgbaToCSS(textData.fc) : '#000';
+          const ff    = textData.f || 'Arial';
+          const fwMap = { Regular:400, Bold:700, Light:300, Medium:500, Black:900 };
+          const fw    = fwMap[ff.split('-').pop()] || 400;
+          const jMap  = { 0:'left', 1:'right', 2:'center', 3:'justify' };
+          const ta    = jMap[textData.j] || 'left';
+          innerContent = `<div style="font-size:${fs}px;line-height:${lh}px;color:${fc};font-family:'${ff.split('-')[0]}',sans-serif;font-weight:${fw};text-align:${ta};white-space:pre-line;">${txt}</div>`;
+          report.push({ type:'ok', name: layer.nm || 'text', desc: `Text layer → div (${ff}, ${fs}px, align:${ta})` });
+        } else {
+          report.push({ type:'warn', name: layer.nm || 'text', desc: 'Text layer — could not extract text data' });
+        }
+
+      } else if (layerType === 1) {
+        const sc = layer.sc || '#000000';
+        const sw = layer.sw || w;
+        const sh = layer.sh || h;
+        extraStyle = `width:${sw}px;height:${sh}px;background:${sc};`;
+        report.push({ type:'ok', name: layer.nm || 'solid', desc: `Solid layer → colored div (${sc})` });
+
+      } else if (layerType === 0) {
+        // ── PRECOMP: recursively process sub-layers ──
+        const refId = layer.refId;
+        const precompAsset = compData.assets ? compData.assets.find(a => a.id === refId && a.layers) : null;
+        if (precompAsset && depth < 5) {
+          const precompW = precompAsset.w || w;
+          const precompH = precompAsset.h || h;
+          extraStyle = `width:${precompW}px;height:${precompH}px;overflow:hidden;`;
+
+          // Recursively process precomp layers
+          const subProcessed = processLayers(precompAsset.layers, compData, layerId + '_', depth + 1);
+
+          // Build nested HTML tree from sub-layers (with parenting)
+          childrenHTML = buildNestedHTML(subProcessed, srcLayers);
+
+          report.push({ type:'ok', name: layer.nm || 'precomp', desc: `Precomp → nested div (${precompAsset.layers.length} sub-layers, ${precompW}×${precompH})` });
+        } else if (!precompAsset) {
+          report.push({ type:'warn', name: layer.nm || 'precomp', desc: 'Precomp asset not found in JSON' });
+        } else {
+          report.push({ type:'warn', name: layer.nm || 'precomp', desc: 'Precomp nesting too deep (max 5 levels)' });
+        }
+
+      } else if (layerType === 3) {
+        extraStyle = 'pointer-events:none;';
+        report.push({ type:'ok', name: layer.nm || 'null', desc: 'Null layer → invisible transform container' });
+      } else if (layerType === 4) {
+        extraStyle = 'pointer-events:none;';
+      }
+
+      // ── Build animation CSS ──
+      let animCSS = '';
+      if (animNames.length > 0) {
+        animCSS = `
   animation-name: ${animNames.join(', ')};
   animation-duration: ${animDurations.join(', ')};
   animation-delay: ${animDelays.join(', ')};
   animation-fill-mode: ${animFills.join(', ')};
   animation-timing-function: ${animTimings.join(', ')};
   animation-iteration-count: ${animIter.join(', ')};`;
-    }
+      }
 
-    const zIndex = layers.length - idx;
+      const zIndex = idx + 1;
 
-    // Per-layer CSS — transform-origin always 0 0 because the AE formula
-    // already bakes the anchor via translate(-anchor) at the end
-    cssBlocks.push(`
+      cssBlocks.push(`
 #${layerId} {
   position: absolute;
   top: 0; left: 0;
@@ -1097,12 +1086,74 @@ function convertLottie(data, assetMapOverride) {
   ${extraStyle}${animCSS}
 }`);
 
-    // Use <img> directly for image layers (no wrapping div)
-    if (layerType === 2 && innerContent.startsWith('<img')) {
-      layerDivs.push(`  ${innerContent.replace('<img ', `<img id="${layerId}" `)}`);
-    } else {
-      layerDivs.push(`  <div id="${layerId}">${innerContent}</div>`);
+      // Build HTML string for this layer
+      let htmlStr;
+      if (layerType === 2 && innerContent.startsWith('<img')) {
+        htmlStr = `${innerContent.replace('<img ', `<img id="${layerId}" `)}`;
+      } else {
+        htmlStr = `<div id="${layerId}">${innerContent}${childrenHTML}</div>`;
+      }
+
+      processed.push({
+        id: layerId,
+        ind: layer.ind,           // AE layer index (used for parenting)
+        parentInd: layer.parent,  // parent layer index
+        zIndex: zIndex,
+        html: htmlStr,
+        layer: layer,
+      });
+    });
+
+    return processed;
+  }
+
+  // ── Build nested HTML tree respecting parent–child relationships ──
+  function buildNestedHTML(processed, srcLayers) {
+    // Build lookup: AE ind → processed entry
+    const byInd = {};
+    processed.forEach(p => {
+      if (p.ind !== undefined) byInd[p.ind] = p;
+    });
+
+    // Find root layers (no parent, or parent not in this comp)
+    const roots = [];
+    const children = {}; // parentInd → [child entries]
+
+    processed.forEach(p => {
+      if (p.parentInd !== undefined && p.parentInd !== null && byInd[p.parentInd]) {
+        if (!children[p.parentInd]) children[p.parentInd] = [];
+        children[p.parentInd].push(p);
+      } else {
+        roots.push(p);
+      }
+    });
+
+    // Recursively build HTML: inject children into parent divs
+    function renderEntry(entry) {
+      const kids = children[entry.ind] || [];
+      if (kids.length === 0) return '  ' + entry.html;
+
+      // Inject children before closing tag
+      const childHTML = kids.map(k => renderEntry(k)).join('\n');
+
+      // For div-based layers, insert children before </div>
+      if (entry.html.endsWith('</div>')) {
+        return '  ' + entry.html.slice(0, -6) + '\n' + childHTML + '\n  </div>';
+      }
+      // For img layers with children (unusual but handle it): wrap in a div
+      return `  <div style="position:absolute;top:0;left:0;">${entry.html}\n${childHTML}\n  </div>`;
     }
+
+    return roots.map(r => renderEntry(r)).join('\n');
+  }
+
+  // ── Run the processor on root layers ──
+  const rootProcessed = processLayers(data.layers, data, '', 0);
+  const nestedHTML = buildNestedHTML(rootProcessed, data.layers);
+
+  // layerDivs is used by the HTML builder — fill it from nested output
+  nestedHTML.split('\n').forEach(line => {
+    if (line.trim()) layerDivs.push(line);
   });
 
   // ── clickTag snippet ───────────────────────────────────────────
@@ -1225,39 +1276,44 @@ ${clickTagSnippet}
 // across all layers and all keyframes, accounting for scale
 function calcMaxRenderSize(assetId, data) {
   const fps = data.fr || 30;
-  const compW = data.w || 300;
-  const compH = data.h || 300;
-
   let maxScale = 0;
 
-  (data.layers || []).forEach(layer => {
-    if (layer.ty !== 2 || layer.refId !== assetId) return;
+  // Search layers recursively (root layers + precomp sub-layers)
+  function searchLayers(layers) {
+    (layers || []).forEach(layer => {
+      if (layer.ty === 2 && layer.refId === assetId) {
+        const ks = layer.ks || {};
+        const scaleKF = extractKeyframes(ks.s, fps, 'scale');
+        const scaleStatic = getStaticValue(ks.s);
+        let layerMaxScale = 0;
+        if (scaleKF.length > 1) {
+          scaleKF.forEach(kf => {
+            const s = Math.max(Math.abs(kf.v[0]), Math.abs(kf.v[1]));
+            if (s > layerMaxScale) layerMaxScale = s;
+          });
+        } else if (scaleStatic) {
+          layerMaxScale = Math.max(Math.abs(scaleStatic[0]), Math.abs(scaleStatic[1]));
+        } else {
+          layerMaxScale = 100;
+        }
+        if (layerMaxScale > maxScale) maxScale = layerMaxScale;
+      }
+      // Recurse into precomps
+      if (layer.ty === 0 && layer.refId) {
+        const precomp = (data.assets || []).find(a => a.id === layer.refId && a.layers);
+        if (precomp) searchLayers(precomp.layers);
+      }
+    });
+  }
 
-    const ks = layer.ks || {};
-    const scaleKF = extractKeyframes(ks.s, fps, 'scale');
-    const scaleStatic = getStaticValue(ks.s);
-
-    let layerMaxScale = 0;
-    if (scaleKF.length > 1) {
-      scaleKF.forEach(kf => {
-        const s = Math.max(Math.abs(kf.v[0]), Math.abs(kf.v[1]));
-        if (s > layerMaxScale) layerMaxScale = s;
-      });
-    } else if (scaleStatic) {
-      layerMaxScale = Math.max(Math.abs(scaleStatic[0]), Math.abs(scaleStatic[1]));
-    } else {
-      layerMaxScale = 100;
-    }
-    if (layerMaxScale > maxScale) maxScale = layerMaxScale;
-  });
-
+  searchLayers(data.layers);
   if (maxScale === 0) maxScale = 100;
-  return maxScale / 100; // as multiplier
+  return maxScale / 100;
 }
 
 // Resizes and converts a dataURL image to WebP via canvas
 // targetW/targetH: max dimensions after scaling
-function optimiseImage(dataUrl, targetW, targetH, quality) {
+function optimiseImage(dataUrl, targetW, targetH, quality, originalMime) {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => {
@@ -1278,14 +1334,21 @@ function optimiseImage(dataUrl, targetW, targetH, quality) {
       const ctx = canvas.getContext('2d');
       ctx.drawImage(img, 0, 0, outW, outH);
 
-      const webpUrl = canvas.toDataURL('image/webp', quality / 100);
-
-      // Fallback: if browser doesn't support WebP output, keep original format
-      if (webpUrl === 'data:,') {
-        resolve({ dataUrl, outW: srcW, outH: srcH, optimised: false });
-      } else {
-        resolve({ dataUrl: webpUrl, outW, outH, optimised: true, srcW, srcH });
+      // Try WebP first, fall back to JPEG (Safari doesn't support WebP canvas output)
+      let outUrl = canvas.toDataURL('image/webp', quality / 100);
+      let fmt = 'webp';
+      if (!outUrl || outUrl === 'data:,' || outUrl.startsWith('data:image/png')) {
+        // WebP not supported — use JPEG if no transparency needed, else PNG
+        const hasAlpha = originalMime === 'image/png';
+        if (hasAlpha) {
+          outUrl = canvas.toDataURL('image/png');
+          fmt = 'png';
+        } else {
+          outUrl = canvas.toDataURL('image/jpeg', quality / 100);
+          fmt = 'jpeg';
+        }
       }
+      resolve({ dataUrl: outUrl, outW, outH, optimised: true, srcW, srcH, fmt });
     };
     img.onerror = () => reject(new Error('Image load failed'));
     img.src = dataUrl;
@@ -1326,7 +1389,8 @@ async function optimiseAssets(assetMap, data, quality, onProgress) {
 
     try {
       const sizeBefore = Math.round(dataUrl.length * 0.75); // approx bytes from base64
-      const result = await optimiseImage(dataUrl, targetW, targetH, quality);
+      const mime = dataUrl.split(';')[0].replace('data:', '') || 'image/png';
+      const result = await optimiseImage(dataUrl, targetW, targetH, quality, mime);
       const sizeAfter = Math.round(result.dataUrl.length * 0.75);
       const saving = sizeBefore - sizeAfter;
 
@@ -1577,7 +1641,7 @@ function buildZIP(files) {
     const data = file.data;
     const crc = crc32(data);
     const size = data.length;
-    const date = 0x5270, time = 0x0000; // fixed date
+    const date = 0x5C87, time = 0x7779; // current date
 
     // Local file header
     const lh = [
